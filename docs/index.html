@@ -9,31 +9,28 @@
 <meta property="og:description" content="Free, open-source AI Bots that use your apps like you do. Runs on your Mac with the Claude Code plan you already have.">
 <meta name="theme-color" content="#f6f7f9">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root {
   --bg: #f6f7f9;
   --dot: #dadde4;
   --ink: #0e1116;
-  --ink-2: #4b5160;
-  --ink-3: #8a909d;
+  --ink-2: #3e4452;
+  --ink-3: #6f7583;
   --line: #e4e6eb;
-  --head: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", system-ui, sans-serif;
-  --body: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  --head: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --body: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
 }
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
 body {
-  margin: 0; color: var(--ink); font: 15px/1.6 var(--body); -webkit-font-smoothing: antialiased; overflow-x: clip;
+  margin: 0; color: var(--ink); font: 16px/1.55 var(--body); letter-spacing: -.011em; -webkit-font-smoothing: antialiased; overflow-x: clip;
   background: var(--bg) radial-gradient(var(--dot) 1px, transparent 1.2px) 0 0 / 18px 18px;
 }
 a { color: inherit; text-decoration: none; }
 button { font: inherit; color: inherit; cursor: pointer; border: 0; background: none; padding: 0; }
 .wrap { width: min(1180px, 100% - 48px); margin: 0 auto; }
-h1, h2, h3 { font-family: var(--head); font-weight: 600; letter-spacing: -.035em; margin: 0; text-wrap: balance; }
+h1, h2, h3 { font-family: var(--head); font-weight: 600; letter-spacing: -.03em; margin: 0; text-wrap: balance; }
 p { margin: 0; text-wrap: pretty; }
 
 /* ---------- Nav ---------- */
@@ -46,11 +43,12 @@ p { margin: 0; text-wrap: pretty; }
 .nav-r { margin-left: auto; display: flex; align-items: center; gap: 18px; font-size: 14px; font-weight: 500; }
 .gh { display: inline-flex; align-items: center; gap: 7px; }
 .gh:hover { opacity: .7; }
-.gh small { font: 500 12px var(--mono); color: var(--ink-2); }
+.gh small { font: 500 13.5px var(--body); color: var(--ink-2); }
 .pill { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 38px; padding: 0 18px; border-radius: 999px; background: var(--ink); color: #fff; font: 600 14px var(--body); white-space: nowrap; transition: transform .15s, opacity .15s; }
 .pill:hover { opacity: .88; }
 .pill:active { transform: scale(.97); }
 .pill.lg { height: 46px; padding: 0 22px; font-size: 15px; }
+[data-stars]:not(:empty) { padding-left: 8px; margin-left: 2px; border-left: 1px solid var(--line); font-weight: 500; color: var(--ink-2); }
 .pill.ghost { background: #fff; color: var(--ink); box-shadow: inset 0 0 0 1px var(--line); }
 
 /* ---------- Hero ---------- */
@@ -62,7 +60,7 @@ p { margin: 0; text-wrap: pretty; }
 .glow { position: absolute; left: 50%; top: 40px; width: 900px; height: 420px; transform: translateX(-50%); background: radial-gradient(closest-side, rgba(255,255,255,.35), transparent); pointer-events: none; }
 .mark-hero { width: 76px; height: 76px; margin: 0 auto 26px; position: relative; filter: drop-shadow(0 14px 24px rgba(30,60,140,.28)); animation: float 6s ease-in-out infinite; display: block; }
 @keyframes float { 50% { transform: translateY(-8px); } }
-.hero h1 { font-size: clamp(42px, 6.4vw, 72px); line-height: 1.02; color: #0b1020; position: relative; }
+.hero h1 { font-size: clamp(42px, 6.4vw, 72px); line-height: 1.02; letter-spacing: -.04em; color: #0b1020; position: relative; }
 .hero .sub { margin-top: 18px; font-size: 18px; color: #22304a; position: relative; }
 .ask { display: block; position: relative; width: min(620px, 100%); margin: 34px auto 0; border-radius: 22px; background: linear-gradient(180deg, rgba(255,255,255,.98), rgba(244,248,255,.94));
   box-shadow: 0 1px 0 rgba(255,255,255,.8) inset, 0 24px 60px -18px rgba(28,58,130,.45), 0 4px 14px -6px rgba(28,58,130,.25); padding: 18px 18px 14px 20px; text-align: left; }
@@ -72,7 +70,8 @@ p { margin: 0; text-wrap: pretty; }
 .ask-bar { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
 .ask-chip { font-size: 12.5px; color: var(--ink-2); background: #eef2f8; border-radius: 999px; padding: 4px 10px; }
 .ask-go { margin-left: auto; width: 34px; height: 34px; border-radius: 50%; background: var(--ink); color: #fff; display: grid; place-items: center; }
-.hero-note { margin-top: 18px; font-size: 13.5px; color: #2a3a58; position: relative; display: flex; gap: 18px; justify-content: center; flex-wrap: wrap; }
+.hero-note span + span::before { content: ""; display: inline-block; width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: .5; margin: 0 14px 3px 0; vertical-align: middle; }
+.hero-note { margin-top: 18px; font-size: 14px; color: #2a3a58; position: relative; display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
 
 /* Product window */
 .window { position: relative; width: min(1120px, 100%); margin: 72px auto 0; border-radius: 16px; overflow: hidden; text-align: left;
@@ -106,7 +105,7 @@ p { margin: 0; text-wrap: pretty; }
 .composer { margin: 0 12px 12px; border-radius: 12px; border: 1px solid #e7eaf0; background: #fff; padding: 10px 12px; font-size: 12.5px; color: var(--ink-3); display: flex; align-items: center; }
 .composer i { margin-left: auto; width: 24px; height: 24px; border-radius: 50%; background: #cfd6e2; }
 .screen { flex: 1; margin: 10px; border-radius: 10px; overflow: hidden; border: 1px solid #e7eaf0; display: flex; flex-direction: column; }
-.screen .url { font: 11px var(--mono); color: var(--ink-3); padding: 7px 10px; background: #f6f8fb; border-bottom: 1px solid #edf0f4; }
+.screen .url { font: 500 11.5px var(--body); color: var(--ink-3); padding: 7px 10px; background: #f6f8fb; border-bottom: 1px solid #edf0f4; }
 .mail { padding: 8px; display: grid; gap: 6px; }
 .mail div { display: flex; gap: 8px; align-items: center; font-size: 11.5px; padding: 6px 8px; border-radius: 8px; background: #f7f9fc; color: var(--ink-2); white-space: nowrap; overflow: hidden; }
 .mail div b { font-weight: 600; color: var(--ink); width: 74px; flex: none; }
@@ -150,7 +149,7 @@ section { padding: 110px 0 0; }
 .card-h { display: flex; align-items: center; gap: 8px; padding: 14px 16px; border-bottom: 1px solid #edf0f4; font-size: 13.5px; font-weight: 600; }
 .card-h small { margin-left: auto; color: var(--ink-3); font-weight: 500; }
 .table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-.table th { text-align: left; font-weight: 600; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); padding: 9px 16px; }
+.table th { text-align: left; font-weight: 600; font-size: 12px; color: var(--ink-3); padding: 10px 16px; }
 .table td { padding: 10px 16px; border-top: 1px solid #f0f2f6; color: var(--ink-2); }
 .table td:first-child { color: var(--ink); font-weight: 600; }
 .ok { color: #16a34a; font-weight: 600; }
@@ -173,14 +172,14 @@ section { padding: 110px 0 0; }
 .f h3 { font-size: 18px; letter-spacing: -.02em; }
 .f p { color: var(--ink-2); font-size: 13.5px; margin-top: 4px; }
 .f .vis { margin-top: auto; border-radius: 14px; background: #f5f7fb; padding: 14px; font-size: 12.5px; }
-.rec { display: inline-flex; align-items: center; gap: 7px; background: var(--ink); color: #fff; border-radius: 99px; padding: 5px 11px; font: 500 11.5px var(--mono); }
+.rec { display: inline-flex; align-items: center; gap: 7px; background: var(--ink); color: #fff; border-radius: 99px; padding: 5px 11px; font: 500 11.5px var(--body); }
 .rec i { width: 7px; height: 7px; border-radius: 50%; background: #ef4444; animation: blink 1s steps(1) infinite; }
 .li { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-top: 1px solid #e9edf3; color: var(--ink-2); }
 .li:first-child { border-top: 0; }
-.li code { margin-left: auto; font: 11px var(--mono); color: var(--ink-3); }
+.li code { margin-left: auto; font: 12px var(--body); color: var(--ink-3); }
 .tog { width: 30px; height: 18px; border-radius: 99px; background: var(--ink); position: relative; margin-left: auto; flex: none; }
 .tog::after { content: ""; position: absolute; width: 12px; height: 12px; border-radius: 50%; background: #fff; top: 3px; right: 3px; }
-.tag { font: 600 10px var(--mono); padding: 2px 7px; border-radius: 6px; background: #e8eefc; color: #2f5fc4; letter-spacing: .03em; flex: none; }
+.tag { font: 600 11.5px var(--body); padding: 2px 8px; border-radius: 99px; background: #e8eefc; color: #2f5fc4; flex: none; }
 .warn { color: #c2410c; font-size: 12px; margin: 4px 0 8px; }
 
 /* Dark section */
@@ -212,7 +211,7 @@ section { padding: 110px 0 0; }
 .copy-btn { height: 34px; padding: 0 15px; border-radius: 999px; background: #fff; color: var(--ink); font: 600 13px var(--body); flex: none; }
 .num-list { margin-top: 26px; display: grid; gap: 14px; }
 .num-list div { display: flex; gap: 14px; align-items: flex-start; font-size: 15px; color: var(--ink-2); }
-.num-list i { font: 600 12px var(--mono); font-style: normal; width: 26px; height: 26px; border-radius: 50%; background: #fff; box-shadow: inset 0 0 0 1px var(--line); display: grid; place-items: center; color: var(--ink); flex: none; }
+.num-list i { font: 600 12px var(--body); font-style: normal; width: 26px; height: 26px; border-radius: 50%; background: #fff; box-shadow: inset 0 0 0 1px var(--line); display: grid; place-items: center; color: var(--ink); flex: none; }
 .term { margin-top: 14px; border-radius: 16px; background: #fff; box-shadow: inset 0 0 0 1px var(--line); padding: 18px 20px; font: 12.5px/1.9 var(--mono); color: var(--ink-2); }
 .term .g { color: #16a34a; }
 .req { margin-top: 14px; font-size: 13px; color: var(--ink-3); }
@@ -323,11 +322,11 @@ footer { padding: 64px 0 40px; }
     <a class="ask" href="#install" aria-label="Install Tandem">
       <div class="typed" id="typed"></div>
       <div class="ask-bar">
-        <span class="ask-chip">＋ Inbox Manager</span><span class="ask-chip">Gmail · Outlook</span>
+        <span class="ask-chip">Inbox Manager</span><span class="ask-chip">Gmail and Outlook</span>
         <span class="ask-go"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span>
       </div>
     </a>
-    <div class="hero-note"><span>✓ Free and open source</span><span>✓ Runs on your Claude Code plan</span><span>✓ Your data stays on your Mac</span></div>
+    <div class="hero-note"><span>Free and open source</span><span>Runs on your Claude Code plan</span><span>Your data stays on your Mac</span></div>
 
     <div class="window rv" aria-label="The Tandem app">
       <div class="win-bar"><i></i><i></i><i></i><span>Tandem</span></div>
@@ -348,7 +347,7 @@ footer { padding: 64px 0 40px; }
           <div class="convo">
             <div class="me-msg">Clear my inbox and draft anything that just needs a yes.</div>
             <div class="bot-msg"><span data-av="circle:#e5533d:I" data-s="26"></span><div>
-              <div class="steps-done">✓ Worked for 3m 12s · 9 steps</div>
+              <div class="steps-done">Worked for 3 min, 9 steps</div>
               Done. 41 emails sorted: 6 need you, 22 FYI, 13 newsletters archived. Dana's renewal reply is drafted.
               <div class="mini-card">
                 <div class="row"><b style="font-weight:600">Re: Q1 renewal</b><span style="margin-left:auto;color:#8a909d;font-size:11px">Not sent</span></div>
@@ -387,7 +386,7 @@ footer { padding: 64px 0 40px; }
     <div class="cell"><b>1 line</b><span>To install on a Mac</span></div>
     <div class="cell"><b>0</b><span>Accounts to create</span></div>
     <div class="cell txt"><h3>Open source, built in the open.</h3><p>Read every line, change anything. If it saves you time, a star helps other people find it.</p>
-      <div><a class="pill ghost" href="https://github.com/NeilGilani/tandem" target="_blank" rel="noopener" style="height:34px;font-size:13px">★ Star on GitHub <span data-stars></span></a></div></div>
+      <div><a class="pill ghost" href="https://github.com/NeilGilani/tandem" target="_blank" rel="noopener" style="height:34px;font-size:13px"><svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.75.75 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25Z"/></svg>Star on GitHub <span data-stars></span></a></div></div>
   </div>
 </div>
 
@@ -423,14 +422,14 @@ footer { padding: 64px 0 40px; }
             <div class="me-msg" style="max-width:90%">Your job: every weekday at 8, clear my inbox, draft replies, and tell me what needs me.</div>
             <div class="bot-msg"><span data-av="circle:#e5533d:I" data-s="26"></span><div>Got it. I saved that as my job and set it to run weekdays at 8:00 AM. First run is tomorrow.</div></div>
             <div style="display:grid;gap:8px">
-              <div class="li" style="background:#f5f7fb;border-radius:10px;padding:10px 12px;border:0"><span class="tag">MEMORY</span>Drafts: short, direct, no exclamation marks</div>
-              <div class="li" style="background:#f5f7fb;border-radius:10px;padding:10px 12px;border:0"><b style="font-weight:600;color:#0e1116">Morning inbox</b>· Weekdays 8:00 AM<span class="tog"></span></div>
+              <div class="li" style="background:#f5f7fb;border-radius:10px;padding:10px 12px;border:0"><span class="tag">Memory</span>Drafts: short, direct, no exclamation marks</div>
+              <div class="li" style="background:#f5f7fb;border-radius:10px;padding:10px 12px;border:0"><b style="font-weight:600;color:#0e1116">Morning inbox</b><span style="color:#6f7583">Weekdays, 8:00 AM</span><span class="tog"></span></div>
             </div>
           </div>
         </div>
         <div class="scene">
           <div class="card" style="width:min(500px,100%)">
-            <div class="card-h"><i style="width:10px;height:10px;border-radius:50%;background:#ff5f57"></i><i style="width:10px;height:10px;border-radius:50%;background:#febc2e"></i><i style="width:10px;height:10px;border-radius:50%;background:#28c840"></i><span style="font:500 11.5px var(--mono);color:#8a909d;margin:0 auto">salesforce.com/leads</span></div>
+            <div class="card-h"><i style="width:10px;height:10px;border-radius:50%;background:#ff5f57"></i><i style="width:10px;height:10px;border-radius:50%;background:#febc2e"></i><i style="width:10px;height:10px;border-radius:50%;background:#28c840"></i><span style="font:500 12px var(--body);color:#6f7583;margin:0 auto">salesforce.com/leads</span></div>
             <table class="table">
               <tr><th>Account</th><th>Owner</th><th>Status</th></tr>
               <tr><td>Northwind</td><td>You</td><td>Researched</td></tr>
@@ -438,7 +437,7 @@ footer { padding: 64px 0 40px; }
               <tr><td>Initech</td><td>You</td><td>Queued</td></tr>
               <tr><td>Umbrella</td><td>You</td><td>Queued</td></tr>
             </table>
-            <div class="activity"><span class="spin"></span>Sales Outbound · Updating Globex in Salesforce</div>
+            <div class="activity"><span class="spin"></span>Sales Outbound is updating Globex in Salesforce</div>
           </div>
         </div>
         <div class="scene">
@@ -448,7 +447,7 @@ footer { padding: 64px 0 40px; }
               <b style="font:600 18px var(--head);letter-spacing:-.02em">Intro: Tandem × Northwind</b>
               <div style="color:#8a909d;font-size:12px">To: priya@northwind.com</div>
               <div style="color:#2b3140">Hi Priya, saw Northwind just opened a Denver office. We help ops teams cut month-end close in half. Worth 15 minutes Thursday?</div>
-              <div class="warn">⚠ Waiting for your OK before it goes out</div>
+              <div class="warn">Waiting for your OK before it goes out</div>
             </div>
           </div>
         </div>
@@ -478,12 +477,12 @@ footer { padding: 64px 0 40px; }
       <div class="f wide rv">
         <div><h3>Show it once.</h3><p>Record yourself doing a task. Tandem writes it up as a skill any Bot can reuse.</p></div>
         <div class="vis">
-          <span class="rec"><i></i>Recording · 0:42</span>
+          <span class="rec"><i></i>Recording 0:42</span>
           <div style="margin-top:10px">
-            <div class="li">Open billing portal → Invoices<code>0:04</code></div>
+            <div class="li">Open the billing portal, go to Invoices<code>0:04</code></div>
             <div class="li">Filter to last month<code>0:15</code></div>
             <div class="li">Download each PDF to /Invoices<code>0:31</code></div>
-            <div class="li"><b style="font-weight:600;color:#0e1116">Skill saved:</b>Monthly invoices<code style="color:#16a34a">✓</code></div>
+            <div class="li"><b style="font-weight:600;color:#0e1116">Skill saved:</b>Monthly invoices<code style="color:#16a34a">Done</code></div>
           </div>
         </div>
       </div>
@@ -498,24 +497,24 @@ footer { padding: 64px 0 40px; }
       <div class="f rv">
         <div><h3>Remembers how you work.</h3><p>Tell it once. Every Bot knows the facts about you.</p></div>
         <div class="vis" style="display:grid;gap:9px">
-          <div class="li" style="border:0;padding:0"><span class="tag">SAVED</span>Acme only signs annual</div>
-          <div class="li" style="border:0;padding:0"><span class="tag">SAVED</span>Dana approves renewals</div>
-          <div class="li" style="border:0;padding:0"><span class="tag">YOU</span>No meetings before 10 AM</div>
+          <div class="li" style="border:0;padding:0"><span class="tag">Saved</span>Acme only signs annual</div>
+          <div class="li" style="border:0;padding:0"><span class="tag">Saved</span>Dana approves renewals</div>
+          <div class="li" style="border:0;padding:0"><span class="tag">About you</span>No meetings before 10 AM</div>
         </div>
       </div>
       <div class="f rv">
         <div><h3>Bots work together.</h3><p>They hand work to each other, and you see every handoff.</p></div>
         <div class="vis" style="display:grid;gap:8px">
-          <div class="li" style="border:0;padding:0"><span data-av="star:#5f86e0:C" data-s="20"></span>→<span data-av="hexagon:#e0a030:R" data-s="20"></span><span>Find 3 venues under $5k</span></div>
-          <div class="li" style="border:0;padding:0"><span data-av="hexagon:#e0a030:R" data-s="20"></span>→<span data-av="star:#5f86e0:C" data-s="20"></span><span class="ok">Venue B, $4,200</span></div>
-          <div class="li" style="border:0;padding:0"><span data-av="star:#5f86e0:C" data-s="20"></span>→<span data-av="diamond:#d9468f:T" data-s="20"></span><span>Book it, draft the invite</span></div>
+          <div class="li" style="border:0;padding:0"><span data-av="star:#5f86e0:C" data-s="20"></span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9aa0ad" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex:none"><path d="M5 12h14M13 6l6 6-6 6"/></svg><span data-av="hexagon:#e0a030:R" data-s="20"></span><span>Find 3 venues under $5k</span></div>
+          <div class="li" style="border:0;padding:0"><span data-av="hexagon:#e0a030:R" data-s="20"></span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9aa0ad" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex:none"><path d="M5 12h14M13 6l6 6-6 6"/></svg><span data-av="star:#5f86e0:C" data-s="20"></span><span class="ok">Venue B, $4,200</span></div>
+          <div class="li" style="border:0;padding:0"><span data-av="star:#5f86e0:C" data-s="20"></span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9aa0ad" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex:none"><path d="M5 12h14M13 6l6 6-6 6"/></svg><span data-av="diamond:#d9468f:T" data-s="20"></span><span>Book it, draft the invite</span></div>
         </div>
       </div>
       <div class="f rv">
         <div><h3>Asks before it acts.</h3><p>Write your own rules in plain English.</p></div>
         <div class="vis">
           <b style="font-weight:600">Send campaign to 1,240 contacts?</b>
-          <div class="warn">⚠ This shares your data outside this chat</div>
+          <div class="warn">Shares your data outside this chat</div>
           <div style="display:flex;gap:6px;flex-wrap:wrap"><span class="btn-s dark">Allow once</span><span class="btn-s">Always allow</span><span class="btn-s" style="color:#b91c1c">Deny</span></div>
         </div>
       </div>
@@ -563,7 +562,7 @@ footer { padding: 64px 0 40px; }
         <div>Installing dependencies…</div>
         <div><span class="g">✓</span> Tandem is running at http://127.0.0.1:4747</div>
       </div>
-      <p class="req">Needs macOS, Node 22.13+, Google Chrome and Claude Code. Remove it anytime with <code style="font:12.5px var(--mono)">tandem uninstall</code>.</p>
+      <p class="req">Needs macOS, Node 22.13+, Google Chrome and Claude Code. Remove it anytime with <code style="font:13px var(--mono);color:var(--ink-2)">tandem uninstall</code>.</p>
     </div>
   </div>
 </section>
@@ -578,7 +577,7 @@ footer { padding: 64px 0 40px; }
       <details><summary>Does a Bot do anything without asking me?</summary><p>Not by default. Emails and messages arrive as drafts with a Send button, and anything that sends, buys, deletes or posts waits for your OK. You can loosen or tighten that with your own rules.</p></details>
       <details><summary>What about passwords and 2FA?</summary><p>Saved logins live in your Mac's Keychain and are filled in for the Bot, which never sees them. For passkeys, codes and CAPTCHAs, the Bot hands you the screen. You do that one step and press I'm done.</p></details>
       <details><summary>Does it work when my laptop is closed?</summary><p>Bots run on your Mac, so they work whenever it's awake. Tandem starts at login and keeps going with the window closed. For round-the-clock routines, run it on a Mac mini that stays on.</p></details>
-      <details><summary>Can I use it from my phone?</summary><p>Yes. Run <code>tandem install --lan</code>, open the link from Settings → Devices on your phone, and add it to your home screen.</p></details>
+      <details><summary>Can I use it from my phone?</summary><p>Yes. Run <code>tandem install --lan</code>, open the link under Settings, Devices on your phone, and add it to your home screen.</p></details>
       <details><summary>Who makes this?</summary><p>It's an independent open-source project, not affiliated with Anthropic, xAI or SpaceX. Contributions are welcome.</p></details>
     </div>
   </div>
@@ -590,10 +589,10 @@ footer { padding: 64px 0 40px; }
     <h2>Hand off your first job.</h2>
     <p>One line to install. Free, forever.</p>
     <a class="ask" href="#install" aria-label="Install Tandem"><div class="typed" id="typed2"></div>
-      <div class="ask-bar"><span class="ask-chip">＋ New Bot</span><span class="ask-go"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span></div></a>
+      <div class="ask-bar"><span class="ask-chip">New Bot</span><span class="ask-go"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span></div></a>
     <div class="final-cta">
       <button class="pill lg" data-copy>Copy install command</button>
-      <a class="pill lg ghost" href="https://github.com/NeilGilani/tandem" target="_blank" rel="noopener">★ Star on GitHub <span data-stars></span></a>
+      <a class="pill lg ghost" href="https://github.com/NeilGilani/tandem" target="_blank" rel="noopener"><svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.75.75 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25Z"/></svg>Star on GitHub <span data-stars></span></a>
     </div>
   </div>
 </div>
@@ -665,8 +664,8 @@ document.querySelectorAll('[data-copy]').forEach((b) => b.addEventListener('clic
 fetch(`https://api.github.com/repos/${REPO}`).then((r) => r.json()).then((j) => {
   if (typeof j.stargazers_count !== 'number') return;
   const n = j.stargazers_count >= 1000 ? (j.stargazers_count / 1000).toFixed(1).replace(/\.0$/, '') + 'k' : String(j.stargazers_count);
-  document.querySelectorAll('[data-stars]').forEach((el) => (el.textContent = `· ${n}`));
-  document.querySelector('[data-stars-label]').textContent = `Star · ${n}`;
+  document.querySelectorAll('[data-stars]').forEach((el) => (el.textContent = n));
+  document.querySelector('[data-stars-label]').textContent = n;
 }).catch(() => {});
 
 const steps = [...document.querySelectorAll('#stepList .step')];
@@ -696,14 +695,18 @@ show(0);
 
 const TILES = [
   ['gm', 'M', '#ea4335'], ['ol', 'O', '#0078d4'], ['tm', 'T', '#5b5fc7'], ['sl', 'S', '#611f69'], ['gc', '31', '#4285f4'],
-  ['sf', 'S', '#00a1e0'], ['hs', 'H', '#ff7a59'], ['vault', '⚿', '#3a4252'], ['li', 'in', '#0a66c2'], ['nt', 'N', '#2f3437'],
-  ['gd', 'D', '#0f9d58'], ['gs', '⊞', '#188038'], ['core', '', ''], ['ji', 'J', '#0052cc'], ['ln', 'L', '#5e6ad2'],
-  ['st', 'S', '#635bff'], ['qb', 'qb', '#2ca01c'], ['mcp', '⌘', '#4b5563'], ['sh', 'S', '#5e8e3e'], ['ex', 'E', '#0185ff'],
+  ['sf', 'S', '#00a1e0'], ['hs', 'H', '#ff7a59'], ['vault', 'lock', '#3a4252'], ['li', 'in', '#0a66c2'], ['nt', 'N', '#2f3437'],
+  ['gd', 'D', '#0f9d58'], ['gs', 'S', '#188038'], ['core', '', ''], ['ji', 'J', '#0052cc'], ['ln', 'L', '#5e6ad2'],
+  ['st', 'S', '#635bff'], ['qb', 'qb', '#2ca01c'], ['mcp', 'plug', '#4b5563'], ['sh', 'S', '#5e8e3e'], ['ex', 'E', '#0185ff'],
 ];
+const ICONS = {
+  lock: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>',
+  plug: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0zM12 18v4"/></svg>',
+};
 const tiles = document.getElementById('tiles');
 tiles.innerHTML = TILES.map(([id, t, c]) => id === 'core'
   ? `<div class="tile core"><svg width="34" height="34" viewBox="0 0 512 512"><circle cx="200" cy="256" r="90" fill="none" stroke="#fff" stroke-width="44"/><circle cx="312" cy="256" r="90" fill="none" stroke="#0e1116" stroke-opacity=".55" stroke-width="44"/></svg></div>`
-  : `<div class="tile" data-id="${id}" style="--c:${c}">${t}</div>`).join('');
+  : `<div class="tile" data-id="${id}" style="--c:${c}">${ICONS[t] || t}</div>`).join('');
 const accItems = [...document.querySelectorAll('#acc .acc-i')];
 let accCur = 0, accTimer;
 function lightAcc(i) {
