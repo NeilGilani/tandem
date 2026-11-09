@@ -2,7 +2,7 @@
 import { api } from './lib.js';
 
 export const S = {
-  bots: [], chats: [], sections: [], runs: [], connectors: [], settings: {}, computer: {},
+  bots: [], chats: [], sections: [], runs: [], connectors: [], settings: {}, computers: {},
   messages: {}, // chatId -> [messages]
   showComputer: (() => { try { return localStorage.getItem('tandem.computer') === '1'; } catch { return false; } })(),
   route: routeFromHash(),
@@ -27,6 +27,16 @@ export const bot = (id) => S.bots.find((b) => b.id === id);
 export const chat = (id) => S.chats.find((c) => c.id === id);
 export const dmOf = (botId) => S.chats.find((c) => c.kind === 'dm' && c.bot_ids[0] === botId);
 export const runsIn = (chatId) => S.runs.filter((r) => r.chatId === chatId);
+export const comp = (botId) => S.computers[botId] || { control: 'bot' };
+// The Bot whose computer the current view is about.
+export function focusBot() {
+  if (S.route.name !== 'chat') return S.focusBot && bot(S.focusBot) ? S.focusBot : S.bots[0]?.id;
+  const c = chat(S.route.id);
+  if (!c) return null;
+  if (c.kind === 'dm') return c.bot_ids[0];
+  const running = S.runs.find((r) => r.chatId === c.id);
+  return running?.botId || (c.bot_ids.includes(S.focusBot) ? S.focusBot : c.bot_ids[0]);
+}
 
 export function go(hash) {
   if (location.hash !== hash) location.hash = hash;
@@ -67,7 +77,7 @@ export function connectEvents() {
     if (!r.ended) S.runs.push(r);
     fire('run', r);
   });
-  es.addEventListener('computer', (e) => { S.computer = JSON.parse(e.data); fire('computer'); });
+  es.addEventListener('computer', (e) => { const c = JSON.parse(e.data); if (c.botId) S.computers[c.botId] = c; fire('computer', c); });
   for (const t of ['routines', 'skills', 'library', 'teach.limit']) es.addEventListener(t, (e) => fire(t, JSON.parse(e.data || '{}')));
   es.addEventListener('notify', (e) => fire('notify', JSON.parse(e.data)));
   es.onerror = () => { setTimeout(() => { if (es.readyState === 2) connectEvents(); }, 3000); };

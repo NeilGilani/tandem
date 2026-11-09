@@ -1,18 +1,30 @@
 // Full-page views: Connect apps, Skills, Settings, Bot templates.
-import { api, h, avatar, icon, toast, modal, confirm, sw, logo, time, md } from './lib.js';
+import { api, h, avatar, icon, toast, modal, confirm, sw, logo, time, md, menu } from './lib.js';
 import { S, bot, dmOf, refresh, go, toggleComputer } from './store.js';
 
 const page = ($main, title, lede, ...content) => {
   $main.replaceChildren(h('div.page', h('div.page-in',
-    h('div.row', h('button.icon-btn.back-btn', { on: { click: () => go('#/') } }, icon('back')), h('h1', title)),
+    h('div.hstack', h('button.icon-btn.back-btn', { on: { click: () => go('#/') } }, icon('back')), h('h1', title)),
     lede && h('p.lede', lede), ...content)));
 };
 
 // ---------- Connect apps -------------------------------------------------------------------
-let appFilter = 'All', appQuery = '', appTab = 'apps';
+let appFilter = 'All', appQuery = '', appTab = 'apps', appBot = null;
 
 export async function renderApps($main) {
-  const data = await api('GET', '/api/connectors');
+  if (appBot && !bot(appBot)) appBot = null;
+  const data = await api('GET', `/api/connectors${appBot ? `?bot=${encodeURIComponent(appBot)}` : ''}`);
+  appBot = data.bot;
+  const forBot = bot(appBot);
+  const botPicker = forBot ? h('button.btn', { on: { click: (e) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    menu(r.left, r.bottom + 4, S.bots.map((x) => ({ label: x.name, onClick: () => { appBot = x.id; renderApps($main); } })));
+  } } }, avatar(forBot, 18), `For ${forBot.name}`) : null;
+  const signIn = async (id, name) => {
+    await api('POST', `/api/connectors/${id}/signin`, { botId: appBot });
+    toast(`Sign in to ${name} in the window that opened, then press I'm done`);
+    S.focusBot = appBot; toggleComputer(true);
+  };
   const tabs = h('div.tabs', [['apps', 'Apps'], ['installed', `Connected (${data.installed.length})`], ['skills', 'Private skills'], ['custom', 'Custom app (MCP)']].map(([k, l]) =>
     h(`button${appTab === k ? '.on' : ''}`, { on: { click: () => { appTab = k; renderApps($main); } } }, l)));
 
@@ -21,27 +33,28 @@ export async function renderApps($main) {
     const search = h('input.input', { placeholder: 'Search apps', value: appQuery, style: { maxWidth: '280px' }, on: { input: (e) => { appQuery = e.target.value; drawGrid(); } } });
     const chips = h('div.filter-row');
     const grid = h('div.grid');
-    const drawChips = () => chips.replaceChildren(...['All', ...data.categories].map((c) => h(`button.chip${appFilter === c ? '.on' : ''}`, { on: { click: () => { appFilter = c; drawChips(); drawGrid(); } } }, c)));
+    const drawChips = () => chips.replaceChildren(...['All', ...data.categories].map((c) => h(`button.chip-btn${appFilter === c ? '.on' : ''}`, { on: { click: () => { appFilter = c; drawChips(); drawGrid(); } } }, c)));
     const drawGrid = () => {
       const q = appQuery.toLowerCase();
       grid.replaceChildren(...data.catalog.filter((a) => (appFilter === 'All' || a.category === appFilter) && (!q || a.name.toLowerCase().includes(q))).map(appTile));
     };
     drawChips(); drawGrid();
-    content = [h('div.row', { style: { marginBottom: '12px' } }, search), chips, grid];
+    content = [h('div.hstack', { style: { marginBottom: '12px' } }, search), chips, grid];
   } else if (appTab === 'installed') {
     content = data.installed.length ? h('div.list', data.installed.map((c) => h('div.list-row',
       c.catalog_id === 'custom' ? h('span.logo', { style: { background: '#334155' } }, '⚙︎') : logo(c),
       h('div.grow', c.name, h('small', c.catalog_id === 'custom' ? (c.config?.url || `${c.config?.command} ${(c.config?.args || []).join(' ')}`) : c.category)),
-      statusPill(c.status), actionsFor(c, () => renderApps($main)))))
+      statusPill(c.status), actionsFor(c, () => renderApps($main), signIn))))
       : h('p.hint', 'Nothing connected yet.');
   } else if (appTab === 'skills') {
     content = await privateSkills();
   } else {
     content = customAppForm(() => { appTab = 'installed'; renderApps($main); });
   }
-  page($main, 'Connect apps', 'Sign in once and every Bot can use the app. Apps without an API connector are used through the computer’s browser — the session persists and is shared across your Bots. Mac apps run natively.',
-    h('div.row', { style: { marginBottom: '14px', flexWrap: 'wrap' } },
-      h('button.btn', { on: { click: () => api('POST', '/api/connectors/refresh').then(() => { toast('Checked sign-ins'); renderApps($main); }) } }, icon('refresh'), 'Check sign-ins'),
+  page($main, 'Connect apps', 'Each Bot has its own computer, so you sign in to apps per Bot. Pick a Bot, then add and sign in to the apps it should use. Its sign-ins stay on its computer. Mac apps and custom MCP apps work for every Bot.',
+    h('div.hstack', { style: { marginBottom: '14px', flexWrap: 'wrap' } },
+      botPicker,
+      h('button.btn', { on: { click: () => api('POST', `/api/connectors/refresh?bot=${encodeURIComponent(appBot || '')}`).then(() => { toast('Checked sign-ins'); renderApps($main); }) } }, icon('refresh'), 'Check sign-ins'),
       h('button.btn', { on: { click: () => go('#/templates') } }, icon('template'), 'Bot templates'),
       h('button.btn', { on: { click: () => go('#/settings/vault') } }, icon('key'), 'Vault')),
     tabs, content);
@@ -50,10 +63,10 @@ export async function renderApps($main) {
     return h('div.tile',
       h('div.tile-h', logo(a), h('div', { style: { flex: 1 } }, h('b', a.name), h('div.hint', a.category)), a.status && statusPill(a.status)),
       h('p', a.tips),
-      h('div.row', a.installed_id ? actionsFor({ ...a, id: a.installed_id }, () => renderApps($main)) :
+      h('div.hstack', a.installed_id ? actionsFor({ ...a, id: a.installed_id }, () => renderApps($main), signIn) :
         h('button.btn', { on: { click: async () => {
           const row = await api('POST', '/api/connectors', { catalogId: a.id });
-          if (a.kind === 'browser') { await api('POST', `/api/connectors/${row.id}/signin`); toggleComputer(true); toast(`Sign in to ${a.name} in the computer, then press I'm done`); }
+          if (a.kind === 'browser' && appBot) await signIn(row.id, a.name);
           else toast(`${a.name} connected. macOS asks for permission the first time a Bot uses it.`);
           renderApps($main);
         } } }, icon('plus'), 'Add')));
@@ -65,14 +78,13 @@ function statusPill(s) {
   return h(`span.pill${cls}`, s);
 }
 
-function actionsFor(c, after) {
+function actionsFor(c, after, signIn) {
   const kind = c.kind || (c.catalog_id === 'custom' ? 'custom' : 'browser');
-  return h('div.row', { style: { gap: '6px' } },
-    kind === 'browser' && h('button.btn', { on: { click: async () => { await api('POST', `/api/connectors/${c.id}/signin`); toggleComputer(true); toast(`Sign in to ${c.name}, then press I'm done`); } } },
-      c.status === 'Connected' ? 'Reconnect' : 'Sign in'),
-    kind === 'browser' && c.status !== 'Connected' && h('button.btn.ghost', { title: 'Mark as signed in', on: { click: () => api('POST', `/api/connectors/${c.id}/connected`).then(after) } }, 'I’m signed in'),
+  return h('div.hstack', { style: { gap: '6px' } },
+    kind === 'browser' && h('button.btn', { on: { click: () => signIn(c.id, c.name) } }, c.status === 'Connected' ? 'Reconnect' : 'Sign in'),
+    kind === 'browser' && c.status !== 'Connected' && h('button.btn.ghost', { title: 'Mark as signed in', on: { click: () => api('POST', `/api/connectors/${c.id}/connected`, { botId: appBot }).then(after) } }, 'I’m signed in'),
     h('button.btn.ghost.danger', { on: { click: async () => {
-      if (!await confirm(`Remove ${c.name}? This signs the computer out of it.`, { label: 'Remove' })) return;
+      if (!await confirm(`Remove ${c.name} for all Bots? This signs every Bot's computer out of it.`, { label: 'Remove' })) return;
       await api('DELETE', `/api/connectors/${c.id}`); after();
     } } }, 'Remove'));
 }
@@ -125,7 +137,7 @@ export async function renderSkills($main, r) {
     return page($main, r.id === 'new' ? 'New skill' : s.name, null,
       h('div', { style: { display: 'grid', gap: '14px' } },
         h('div.field', h('label', 'Name'), name), h('div.field', h('label', 'Description'), desc), h('div.field', h('label', 'Instructions'), body),
-        h('div.row',
+        h('div.hstack',
           h('button.btn.primary', { on: { click: async () => {
             try { const saved = r.id === 'new' ? await api('POST', '/api/skills', { name: name.value, description: desc.value, body: body.value }) : await api('PUT', `/api/skills/${r.id}`, { name: name.value, description: desc.value, body: body.value });
               toast('Saved'); go(`#/skills/${saved.slug}`); } catch (e) { toast(e.message, 'bad'); }
@@ -134,7 +146,7 @@ export async function renderSkills($main, r) {
           r.id !== 'new' && h('button.btn.danger', { style: { marginLeft: 'auto' }, on: { click: async () => { if (await confirm(`Delete the skill "${s.name}"?`)) { await api('DELETE', `/api/skills/${r.id}`); go('#/skills'); } } } }, 'Delete'))));
   }
   page($main, 'Skills', 'One private library shared by all your Bots. A good skill says when to use it, the inputs and access it needs, the steps, how to validate, what to return, and which steps need approval. A Bot may still need the app or login to use a skill.',
-    h('div.row', { style: { marginBottom: '14px' } }, h('button.btn.primary', { on: { click: () => go('#/skills/new') } }, icon('plus'), 'New skill'),
+    h('div.hstack', { style: { marginBottom: '14px' } }, h('button.btn.primary', { on: { click: () => go('#/skills/new') } }, icon('plus'), 'New skill'),
       h('span.hint', 'Or open a Bot’s chat → ⋯ → Teach a task')),
     skills.length ? h('div.list', skills.map((s) => h('div.list-row', { style: { cursor: 'pointer' }, on: { click: () => go(`#/skills/${s.slug}`) } },
       icon('book'), h('div.grow', s.name, h('small', s.description)), h('span.hint', time(s.updated)))))
@@ -167,7 +179,7 @@ export async function renderSettings($main, r) {
       const input = h('input.input', { placeholder: kind === 'allow' ? 'e.g. Reading and archiving Gmail newsletters' : 'e.g. Anything in Salesforce that changes an opportunity stage' });
       return h('div.field', h('label', `${title} (${rules.length}/20)`),
         rules.length ? h('div.list', rules.map((x) => h('div.list-row', h('div.grow', x.text), h('button.btn.ghost.danger', { on: { click: () => api('DELETE', `/api/rules/${x.id}`).then(() => renderSettings($main, r)) } }, 'Remove')))) : h('div.hint', 'No rules.'),
-        h('div.row', input, h('button.btn', { on: { click: () => input.value.trim() && api('POST', '/api/rules', { kind, text: input.value.trim() }).then(() => renderSettings($main, r)).catch((e) => toast(e.message, 'bad')) } }, 'Add Rule')));
+        h('div.hstack', input, h('button.btn', { on: { click: () => input.value.trim() && api('POST', '/api/rules', { kind, text: input.value.trim() }).then(() => renderSettings($main, r)).catch((e) => toast(e.message, 'bad')) } }, 'Add Rule')));
     };
     const zones = Intl.supportedValuesOf ? Intl.supportedValuesOf('timeZone') : [st.resolved_timezone];
     const tz = h('select.select', h('option', { value: 'auto', selected: st.timezone === 'auto' }, `Auto-detect (${Intl.DateTimeFormat().resolvedOptions().timeZone})`),
@@ -185,6 +197,7 @@ export async function renderSettings($main, r) {
       ruleList('allow', 'Allow automatically'),
       h('div', { style: { height: '12px' } }),
       ruleList('ask', 'Ask first'),
+      h('h2', 'Your name'), h('div.field', h('input.input', { value: st.user_name || '', style: { maxWidth: '320px' }, on: { change: (e) => patch({ user_name: e.target.value }) } }), h('div.hint', 'Shown in the sidebar.')),
       h('h2', 'Timezone'), h('div.field', tz, h('div.hint', 'Routines use this time zone.')),
       h('h2', 'Appearance'), h('div.field', theme),
       h('h2', 'Import memory'), h('div.field', importBox, h('div.hint', 'Imported memory goes to your primary Bot as facts about you, shared with all Bots.')),
@@ -196,13 +209,17 @@ export async function renderSettings($main, r) {
     content = [
       h('h2', 'Your computer'),
       h('div.field', h('label', 'Execution on this computer'), exec, h('div.hint', 'Whether Bots may run commands on this Mac. Ask every time shows an approval card with Allow, Skip and Always allow.')),
-      h('h2', 'Bot Computer'),
-      h('p.hint', 'All your Bots share one computer: the workspace folder, one browser profile with your sign-ins, and this Mac’s command line. It isn’t a security boundary between Bots — use separate Tandem data folders for separate clients.'),
-      h('dl.kv', h('dt', 'Workspace'), h('dd', h('code', st.workspace))),
-      h('div.row', { style: { flexWrap: 'wrap' } },
-        h('button.btn', { on: { click: () => { toggleComputer(true); } } }, icon('monitor'), 'Open computer'),
-        h('button.btn', { on: { click: () => api('POST', '/api/computer/restart').then(() => toast('Browser restarted')) } }, icon('refresh'), 'Restart browser'),
-        h('button.btn', { on: { click: () => api('POST', '/api/computer/focus') } }, icon('open'), 'Show browser window')),
+      h('h2', 'Bot computers'),
+      h('p.hint', 'Each Bot has its own computer: its own browser with its own sign-ins, and its own files folder. A browser starts when its Bot starts work and goes to sleep after 15 minutes idle. Sign-ins are kept. Commands still run on this Mac.'),
+      h('dl.kv', h('dt', 'Shared folder'), h('dd', h('code', st.shared || '')), h('dt', 'Bot folders'), h('dd', h('code', st.workspace || ''))),
+      S.bots.length ? h('div.list', S.bots.map((b) => {
+        const c = S.computers[b.id] || {};
+        const body = { botId: b.id };
+        return h('div.list-row', avatar(b, 26), h('div.grow', b.name, h('small', c.running ? (c.activity || 'Awake') : 'Asleep')),
+          h('button.btn', { on: { click: () => { S.focusBot = b.id; toggleComputer(true); } } }, 'View'),
+          h('button.btn.ghost', { on: { click: () => api('POST', '/api/computer/focus', body) } }, 'Show window'),
+          h('button.btn.ghost', { on: { click: () => api('POST', '/api/computer/restart', body).then(() => toast(`Restarted ${b.name}'s browser`)) } }, 'Restart'));
+      })) : h('p.hint', 'No Bots yet.'),
     ];
   } else if (t === 'vault') {
     const items = await api('GET', '/api/vault');

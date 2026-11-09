@@ -47,7 +47,7 @@ function mcpConfig(runCtx) {
     },
     playwright: {
       command: process.execPath,
-      args: [path.join(ROOT, 'node_modules', '@playwright', 'mcp', 'cli.js'), '--cdp-endpoint', computer.CDP_URL, '--output-dir', path.join(PATHS.workspace, '.browser')],
+      args: [path.join(ROOT, 'node_modules', '@playwright', 'mcp', 'cli.js'), '--cdp-endpoint', computer.cdpUrl(runCtx.botId), '--output-dir', path.join(computer.workspaceOf(runCtx.botId), '.browser')],
     },
     ...connectors.customMcpServers(),
   };
@@ -56,13 +56,29 @@ function mcpConfig(runCtx) {
   return file;
 }
 
+const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u; } };
+const BROWSER_STATUS = {
+  snapshot: 'Reading the page', take_screenshot: 'Looking at the screen', wait_for: 'Waiting for the page', tabs: 'Switching tabs',
+  navigate_back: 'Going back', console_messages: 'Checking the page', network_requests: 'Checking the page', resize: 'Resizing the window',
+  close: 'Closing the page', install: 'Setting up the browser', press_key: 'Pressing a key', hover: 'Pointing at something',
+};
 function toolStatus(name, input) {
-  if (name.startsWith('mcp__playwright__browser_')) return approvals.describe(name, input).replace(/^Click/, 'Clicking').replace(/^Type/, 'Typing') ||
-    'Using the browser';
+  if (name.startsWith('mcp__playwright__browser_')) {
+    const t = name.replace('mcp__playwright__browser_', '');
+    if (t === 'navigate') return `Opening ${host(input.url)}`;
+    if (t === 'click') return `Clicking ${input.element || 'a button'}`;
+    if (t === 'type') return `Typing into ${input.element || 'a field'}`;
+    if (t === 'fill_form') return 'Filling in a form';
+    return BROWSER_STATUS[t] || 'Using the browser';
+  }
+  const tandem = { remember: 'Updating memory', recall: 'Checking memory', log_work: 'Logging work', message_bot: 'Messaging another Bot', get_skill: 'Loading a skill',
+    save_skill: 'Saving a skill', create_routine: 'Setting up a routine', draft_message: 'Drafting', ask_user: 'Asking you', request_connect: 'Waiting for you to connect an app',
+    request_takeover: 'Waiting for you', vault_fill_login: 'Signing in', add_to_library: 'Saving to your Library', list_connectors: 'Checking connected apps' };
+  const tn = name.replace(/^mcp__tandem__/, '');
+  if (name.startsWith('mcp__tandem__') && tandem[tn]) return tandem[tn];
   if (name === 'Bash' && input.description) return input.description.replace(/\.$/, '');
   const map = { Bash: 'Running a command', Read: 'Reading files', Write: 'Writing a file', Edit: 'Editing a file', Grep: 'Searching files', Glob: 'Looking for files', WebSearch: 'Searching the web', WebFetch: 'Reading a web page' };
   if (map[name]) return map[name];
-  if (name === 'mcp__playwright__browser_navigate') return `Opening ${input.url}`;
   return name.replace(/^mcp__(tandem|app_\w+)__/, '').replace(/_/g, ' ');
 }
 
@@ -136,21 +152,37 @@ function start(botId, chatId, text, opts) {
     '--permission-mode', 'acceptEdits',
     '--permission-prompt-tool', 'mcp__tandem__approval_prompt',
     '--allowedTools', ...READ_ONLY_TOOLS,
-    '--add-dir', PATHS.uploads,
+    '--add-dir', PATHS.uploads, '--add-dir', PATHS.shared,
     ...(sid ? ['--resume', sid] : ['--session-id', newSid]),
   ];
   if (newSid) chats.setSession(chatId, botId, newSid);
 
+  let resolveDone;
+  runCtx.done = new Promise((r) => (resolveDone = r));
+  active.set(key, runCtx);
+  runCtx.status = 'Starting its computer';
+  emit('run', publicRun(runCtx));
+  // Each Bot has its own computer; make sure its browser is up before Claude Code starts.
+  computer.ensureBrowser(botId).catch((e) => console.error('computer', botId, e.message)).then(() => {
+    if (runCtx.stopped) {
+      if (active.get(key) === runCtx) active.delete(key);
+      emit('run', { ...publicRun(runCtx), ended: true });
+      resolveDone({ error: null });
+      return;
+    }
+    runCtx.status = 'Thinking';
+    emit('run', publicRun(runCtx));
+    launch();
+  });
+  return runCtx.done;
+
+  function launch() {
   const child = spawn(CLAUDE_BIN, args, {
-    cwd: PATHS.workspace,
+    cwd: computer.workspaceOf(botId),
     env: childEnv({ MCP_TOOL_TIMEOUT: String(6 * 3600 * 1000), MCP_TIMEOUT: '60000', BASH_DEFAULT_TIMEOUT_MS: '600000' }),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   runCtx.child = child;
-  let resolveDone;
-  runCtx.done = new Promise((r) => (resolveDone = r));
-  active.set(key, runCtx);
-  emit('run', publicRun(runCtx));
 
   let buf = '', stderr = '', resultEvt = null;
   child.stdout.on('data', (d) => {
@@ -166,6 +198,24 @@ function start(botId, chatId, text, opts) {
   });
   child.stderr.on('data', (d) => (stderr += d));
 
+  // Keep a recent screenshot of the computer for the in-chat Computer card.
+  let shotTimer = null;
+  function snapshotSoon() {
+    if (shotTimer) return;
+    shotTimer = setTimeout(async () => {
+      shotTimer = null;
+      try {
+        const shot = await computer.screenshot(botId, 60);
+        if (!shot) return;
+        const dir = path.join(PATHS.uploads, 'shots');
+        fs.mkdirSync(dir, { recursive: true });
+        const file = path.join(dir, `${id}.jpg`);
+        fs.writeFileSync(file, Buffer.from(shot.data, 'base64'));
+        runCtx.lastShot = file;
+      } catch {}
+    }, 2500);
+  }
+
   function setStatus(s) { runCtx.status = s; emit('run', publicRun(runCtx)); }
 
   function handleEvent(evt) {
@@ -179,6 +229,7 @@ function start(botId, chatId, text, opts) {
           runCtx.tail.push(t);
           setStatus(t.split('\n')[0].slice(0, 120));
         } else if (block.type === 'tool_use') {
+          if (block.name.startsWith('mcp__playwright__')) { runCtx.browser = true; snapshotSoon(); }
           const label = toolStatus(block.name, block.input || {});
           runCtx.steps.push({ k: 'tool', t: label });
           runCtx.tail = [];
@@ -194,12 +245,14 @@ function start(botId, chatId, text, opts) {
   function postFinal(finalText) {
     const t = (finalText || '').trim();
     if (!t || (chat.kind === 'group' && /^PASS\.?$/i.test(t))) return;
+    let shot = null;
+    if (runCtx.browser && runCtx.lastShot) shot = runCtx.lastShot;
     const tailSet = new Set(runCtx.tail);
     const steps = runCtx.steps.filter((x) => !(x.k === 'text' && (tailSet.has(x.t) || t.includes(x.t))))
       .slice(-80).map((x) => ({ k: x.k, t: x.t.slice(0, 600) }));
     runCtx.text = t;
     const m = chats.addMessage({ chatId, author: 'bot', botId, text: t, parentId: opts.parentId || null,
-      meta: { runId: id, model, origin: opts.origin, steps, duration: now() - runCtx.started } });
+      meta: { runId: id, model, origin: opts.origin, steps, duration: now() - runCtx.started, browser: !!runCtx.browser, shot } });
     runCtx.messageId = m.id;
   }
 
@@ -234,10 +287,10 @@ function start(botId, chatId, text, opts) {
     if (runCtx.text && bot.notify && opts.origin !== 'chat') emit('notify', { botId, chatId, title: bot.name, body: runCtx.text.slice(0, 140) });
     // Bot-to-bot: the reply lands back where the handoff came from.
     if (opts.replyTo && runCtx.text && !error) deliverReply(botId, opts.replyTo, runCtx.text, opts.depth || 0);
+    computer.touch(botId);
     resolveDone({ error, text: runCtx.text, messageId: runCtx.messageId });
   });
-
-  return runCtx.done;
+  }
 }
 
 export function stop(runId, { silent = false } = {}) {
@@ -246,6 +299,7 @@ export function stop(runId, { silent = false } = {}) {
   r.stopped = true;
   r.silentStop = silent;
   approvals.cancelFor(runId);
+  if (!r.child) return true; // still starting its computer; it won't launch
   r.child.kill('SIGTERM');
   setTimeout(() => { try { r.child.kill('SIGKILL'); } catch {} }, 4000);
   return true;
@@ -255,7 +309,7 @@ export function stopChat(chatId) {
   for (const r of active.values()) if (r.chatId === chatId) stop(r.id);
 }
 
-const publicRun = (r) => ({ id: r.id, botId: r.botId, chatId: r.chatId, status: r.status, model: r.model, origin: r.origin, started: r.started, steps: r.steps?.length || 0 });
+const publicRun = (r) => ({ id: r.id, botId: r.botId, chatId: r.chatId, status: r.status, model: r.model, origin: r.origin, started: r.started, steps: r.steps?.length || 0, browser: !!r.browser });
 export const activeRuns = () => [...active.values()].map(publicRun);
 
 // ---- Entry points -------------------------------------------------------------------
@@ -311,7 +365,7 @@ export function handoff({ fromBot, fromChat, to, text, expectReply = true, depth
   if (depth > 4) throw new Error('Too many handoffs in a row; finish the work or ask the user.');
   const sender = chats.getBot(fromBot);
   const dm = chats.dmFor(target.id);
-  chats.addMessage({ chatId: fromChat, author: 'system', botId: fromBot, text: `${sender.name} → ${target.name}: ${text}`, meta: { handoff: true, to: target.id } });
+  chats.addMessage({ chatId: fromChat, author: 'system', botId: fromBot, text: `Sending to ${target.name}`, meta: { kind: 'handoff', from: fromBot, to: target.id, detail: text } });
   chats.addMessage({ chatId: dm.id, author: 'bot', botId: fromBot, text, meta: { handoff: true, to: target.id, fromChat } });
   runBot(target.id, dm.id, `Message from ${sender.name} (another of the user's Bots):\n${text}` +
     (expectReply ? `\n\nYour final reply will be sent back to ${sender.name}.` : ''),
@@ -321,6 +375,6 @@ export function handoff({ fromBot, fromChat, to, text, expectReply = true, depth
 
 function deliverReply(fromBotId, replyTo, text, depth) {
   const from = chats.getBot(fromBotId);
-  chats.addMessage({ chatId: replyTo.chatId, author: 'system', botId: fromBotId, text: `${from.name} replied: ${text.slice(0, 1500)}`, meta: { handoff: true } });
+  chats.addMessage({ chatId: replyTo.chatId, author: 'system', botId: fromBotId, text: `Message from ${from.name}`, meta: { kind: 'handoff-reply', from: fromBotId, detail: text.slice(0, 4000) } });
   runBot(replyTo.botId, replyTo.chatId, `Reply from ${from.name}:\n${text}`, { origin: 'handoff', depth });
 }

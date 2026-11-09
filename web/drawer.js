@@ -1,6 +1,7 @@
 // Bot details drawer: Details (profile, picture, notifications), Routines, Library, Memory.
 import { api, h, avatar, icon, toast, modal, confirm, sw, time, ago, fileUrl, SHAPES, COLORS } from './lib.js';
 import { S, bot, dmOf, on, refresh, go } from './store.js';
+import { openViewer } from './app.js';
 
 const $drawer = document.getElementById('drawer');
 let openId = null, tab = 'details';
@@ -23,8 +24,9 @@ async function paint() {
   const tabs = [['details', 'Details'], ['routines', 'Routines'], ['library', 'Library'], ['memory', 'Memory']];
   const body = h('div.drawer-b');
   $drawer.replaceChildren(
-    h('div.drawer-h', avatar(b, 30), h('b', b.name), h('button.icon-btn', { on: { click: closeDrawer } }, icon('x'))),
-    h('div', { style: { padding: '0 16px' } }, h('div.tabs', { style: { marginBottom: 0 } }, tabs.map(([k, l]) => h(`button${tab === k ? '.on' : ''}`, { on: { click: () => { tab = k; paint(); } } }, l)))),
+    h('div.drawer-h', h('b', 'Conversation details'), h('button.icon-btn', { on: { click: closeDrawer } }, icon('x'))),
+    h('div.profile', avatar(b, 72, { blink: true }), h('b', b.name), h('span', b.label || (b.is_primary ? 'Primary Bot' : 'Add a label'))),
+    h('div', { style: { padding: '8px 16px 0', display: 'flex', justifyContent: 'center' } }, h('div.tabs', { style: { marginBottom: 0 } }, tabs.map(([k, l]) => h(`button${tab === k ? '.on' : ''}`, { on: { click: () => { tab = k; paint(); } } }, l)))),
     body);
   if (tab === 'details') body.append(...details(b));
   else if (tab === 'routines') body.append(...await routinesTab(b));
@@ -67,7 +69,7 @@ function details(b) {
       h('div.list-row', h('div.grow', 'Pinned', h('small', 'Keep at the top of the sidebar')), sw(!!b.pinned, (v) => patch({ pinned: v }))),
       h('div.list-row', h('div.grow', 'Primary Bot', h('small', b.is_primary ? 'Your main point of contact' : 'Make this your main point of contact')),
         b.is_primary ? h('span.pill.accent', 'Primary') : h('button.btn', { on: { click: () => api('POST', `/api/bots/${b.id}/primary`) } }, 'Make primary'))),
-    h('div.row', { style: { flexWrap: 'wrap' } },
+    h('div.hstack', { style: { flexWrap: 'wrap' } },
       h('button.btn', { on: { click: async () => { const r = await api('POST', `/api/bots/${b.id}/duplicate`); await refresh(); closeDrawer(); go(`#/chat/${r.chat.id}`); toast('Duplicated. Profile, skills and routines were copied; memory and history were not.'); } } }, 'Duplicate'),
       h('button.btn', { on: { click: () => patch({ hidden: !b.hidden }).then(() => toast(b.hidden ? 'Shown in sidebar' : 'Hidden. Routines keep running. Find it under Hidden Bots.')) } }, b.hidden ? 'Show in sidebar' : 'Hide from sidebar'),
       h('button.btn.danger', { on: { click: async () => {
@@ -169,17 +171,27 @@ function copyField(label, value) {
 }
 
 // ---------- Library -----------------------------------------------------------------------
+let libMore = {};
 async function libraryTab(b) {
   const items = await api('GET', `/api/bots/${b.id}/library`);
-  if (!items.length) return [h('p.hint', { style: { margin: 0 } }, 'Pages, images, videos, files and links this Bot produces show up here.')];
-  const kinds = ['page', 'image', 'video', 'file', 'link'];
-  return kinds.filter((k) => items.some((i) => i.kind === k)).map((k) => h('div.field', h('label', `${k[0].toUpperCase()}${k.slice(1)}s`),
-    h('div.list', items.filter((i) => i.kind === k).map((i) => {
-      const href = /^https?:/.test(i.ref) ? i.ref : fileUrl(i.ref);
-      return h('a.list-row', { href, target: '_blank', style: { textDecoration: 'none', color: 'inherit' } },
-        k === 'image' ? h('img', { src: href, style: { width: '44px', height: '44px', objectFit: 'cover', borderRadius: '6px' } }) : null,
-        h('div.grow', i.title, h('small', i.ref)), h('span.pill', i.visibility), h('span.hint', ago(i.created)));
-    }))));
+  if (!items.length) return [h('p.hint', { style: { margin: 0 } }, 'Pages, files, images, videos and links this Bot makes show up here.')];
+  const day = 864e5, nowMs = Date.now();
+  const startToday = new Date(); startToday.setHours(0, 0, 0, 0);
+  const groups = [
+    ['Today', items.filter((i) => i.created >= startToday.getTime())],
+    ['This week', items.filter((i) => i.created < startToday.getTime() && nowMs - i.created < 7 * day)],
+    ['Older', items.filter((i) => nowMs - i.created >= 7 * day)],
+  ].filter(([, l]) => l.length);
+  const ic = { page: 'page', image: 'image', link: 'link', video: 'file', file: 'file' };
+  return groups.map(([name, list]) => {
+    const shown = libMore[name] ? list : list.slice(0, 5);
+    return h('div',
+      h('div.group-h', name),
+      h('div.list', shown.map((i) => h('button.list-row', { style: { width: '100%', border: 0, background: 'none', textAlign: 'left', cursor: 'pointer' }, on: { click: () => openViewer(i) } },
+        i.kind === 'image' && !/^https?:/.test(i.ref) ? h('img', { src: fileUrl(i.ref), style: { width: '36px', height: '36px', objectFit: 'cover', borderRadius: '8px' } }) : h('span.icon-btn', icon(ic[i.kind] || 'file')),
+        h('div.grow', i.title, h('small', /^https?:/.test(i.ref) ? i.ref : i.ref.split('/').pop())), h('span.hint', ago(i.created))))),
+      list.length > 5 && !libMore[name] && h('button.btn.ghost', { style: { marginTop: '6px' }, on: { click: () => { libMore[name] = true; paint(); } } }, 'Show more'));
+  });
 }
 
 // ---------- Memory ------------------------------------------------------------------------

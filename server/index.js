@@ -62,7 +62,7 @@ function serveFile(res, file, extraHeaders = {}) {
 
 function insideAllowed(p) {
   const real = path.resolve(p);
-  return [PATHS.workspace, PATHS.uploads, PATHS.teach].some((root) => real === root || real.startsWith(root + path.sep));
+  return [PATHS.computers, PATHS.shared, PATHS.uploads, PATHS.teach].some((root) => real === root || real.startsWith(root + path.sep));
 }
 
 function lanUrls() {
@@ -74,13 +74,21 @@ function lanUrls() {
 function stateSnapshot() {
   return {
     bots: chats.listBots(),
-    chats: chats.listChats(),
+    chats: chats.listChats().map((c) => ({ ...c, last: lastPreview(c.id) })),
     sections: all('SELECT * FROM sections ORDER BY position'),
     runs: engine.activeRuns(),
-    computer: computer.status(),
+    computers: computer.statusAll(),
     connectors: connectors.installed().map(({ id, catalog_id, name, status, color, category, kind }) => ({ id, catalog_id, name, status, color, category, kind })),
     settings: publicSettings(),
   };
+}
+
+function lastPreview(chatId) {
+  const m = get("SELECT author, bot_id, text, card, created FROM messages WHERE chat_id = ? AND author != 'system' ORDER BY created DESC LIMIT 1", chatId);
+  if (!m) return null;
+  let text = m.text;
+  if (!text && m.card) { try { const c = JSON.parse(m.card); text = c.summary || c.title || c.question || c.reason || ''; } catch {} }
+  return { author: m.author, bot_id: m.bot_id, text: String(text || '').replace(/[`*#>_]+/g, '').slice(0, 140), created: m.created };
 }
 
 function publicSettings() {
@@ -90,10 +98,12 @@ function publicSettings() {
     resolved_timezone: timezone(),
     local_execution: setting('local_execution'),
     theme: setting('theme'),
+    user_name: setting('user_name') || os.userInfo().username,
     rules: approvals.rules(),
     lan: HOST === '0.0.0.0',
     lan_urls: HOST === '0.0.0.0' ? lanUrls().map((u) => `${u}/?token=${setting('access_token')}`) : [],
-    workspace: PATHS.workspace,
+    workspace: PATHS.computers,
+    shared: PATHS.shared,
   };
 }
 
@@ -116,8 +126,10 @@ route('POST', '/api/bots', async (req) => {
   return { bot: b, chat: chats.dmFor(b.id) };
 });
 route('PATCH', '/api/bots/:id', async (req, res, p) => chats.updateBot(p.id, await readJson(req)));
-route('DELETE', '/api/bots/:id', (req, res, p) => {
+route('DELETE', '/api/bots/:id', async (req, res, p) => {
   for (const r of engine.activeRuns().filter((x) => x.botId === p.id)) engine.stop(r.id, { silent: true });
+  await computer.closeBrowser(p.id).catch(() => {});
+  run('DELETE FROM connector_status WHERE bot_id = ?', p.id);
   chats.deleteBot(p.id); return { ok: true };
 });
 route('POST', '/api/bots/:id/primary', (req, res, p) => { chats.setPrimary(p.id); return { ok: true }; });
@@ -182,12 +194,12 @@ route('POST', '/api/uploads', async (req) => {
 });
 
 // Connect apps
-route('GET', '/api/connectors', () => ({ catalog: connectors.catalogWithStatus(), installed: connectors.installed(), categories: CATEGORIES }));
+route('GET', '/api/connectors', (req, res, p, q) => { const b = q.get('bot') || chats.primaryBot()?.id || null; return { bot: b, catalog: connectors.catalogWithStatus(b), installed: connectors.installed(b), categories: CATEGORIES }; });
 route('POST', '/api/connectors', async (req) => connectors.add((await readJson(req)).catalogId));
 route('POST', '/api/connectors/custom', async (req) => ({ id: connectors.addCustom(await readJson(req)) }));
-route('POST', '/api/connectors/refresh', async () => { await connectors.refresh(); return connectors.installed(); });
-route('POST', '/api/connectors/:id/signin', async (req, res, p) => connectors.signIn(p.id));
-route('POST', '/api/connectors/:id/connected', (req, res, p) => { connectors.markConnected(p.id); return { ok: true }; });
+route('POST', '/api/connectors/refresh', async (req, res, p, q) => { const b = q.get('bot'); await connectors.refresh(b || undefined); return connectors.installed(b); });
+route('POST', '/api/connectors/:id/signin', async (req, res, p, q) => connectors.signIn(p.id, { botId: botParam(q, await readJson(req)) }));
+route('POST', '/api/connectors/:id/connected', async (req, res, p, q) => { connectors.markConnected(botParam(q, await readJson(req)), p.id); return { ok: true }; });
 route('DELETE', '/api/connectors/:id', async (req, res, p) => { await connectors.remove(p.id); return { ok: true }; });
 
 // Skills
@@ -216,6 +228,7 @@ route('PATCH', '/api/settings', async (req) => {
   if (b.timezone) { setSetting('timezone', b.timezone); routines.recomputeAll(); }
   if (b.local_execution && ['ask', 'always', 'never'].includes(b.local_execution)) setSetting('local_execution', b.local_execution);
   if (b.theme) setSetting('theme', b.theme);
+  if (b.user_name != null) setSetting('user_name', String(b.user_name).trim().slice(0, 60));
   emit('settings');
   return publicSettings();
 });
@@ -238,50 +251,60 @@ route('GET', '/api/vault', () => vault.list());
 route('POST', '/api/vault', async (req) => vault.save(await readJson(req)));
 route('DELETE', '/api/vault/:id', async (req, res, p) => { await vault.remove(p.id); return { ok: true }; });
 
-// Computer
-route('GET', '/api/computer/status', () => computer.status());
-route('GET', '/api/computer/screenshot', async (req, res) => {
-  const shot = await computer.screenshot().catch(() => null);
-  if (!shot) return json(res, 503, { error: 'Computer browser is not running' });
+// Computers (one per Bot). Every route takes ?bot=<id> or { botId }.
+const botParam = (q, body = {}) => {
+  const id = body.botId || q?.get?.('bot');
+  if (!id || !chats.getBot(id)) throw new Error('Choose a Bot');
+  return id;
+};
+route('GET', '/api/computer/status', () => computer.statusAll());
+route('GET', '/api/computer/screenshot', async (req, res, p, q) => {
+  const id = q.get('bot');
+  const shot = id ? await computer.screenshot(id).catch(() => null) : null;
+  if (!shot) return json(res, 503, { error: 'This Bot’s computer isn’t running' });
   const buf = Buffer.from(shot.data, 'base64');
   res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'no-store', 'X-Page-Url': encodeURIComponent(shot.url || ''),
     'X-Page-Title': encodeURIComponent(shot.title || ''), 'X-Viewport': `${shot.width}x${shot.height}` });
   res.end(buf);
 });
-route('POST', '/api/computer/start', async () => { await computer.ensureBrowser(); return computer.status(); });
-route('POST', '/api/computer/takeover', async (req) => {
+route('POST', '/api/computer/start', async (req, res, p, q) => { const id = botParam(q, await readJson(req)); await computer.ensureBrowser(id); return computer.status(id); });
+route('POST', '/api/computer/takeover', async (req, res, p, q) => {
   const b = await readJson(req);
-  await computer.ensureBrowser();
-  computer.startTakeover({ reason: b.reason || 'You took control' });
-  if (b.focus) computer.bringToFront();
-  return computer.status();
+  const id = botParam(q, b);
+  await computer.ensureBrowser(id);
+  computer.startTakeover({ botId: id, reason: b.reason || 'You took control' });
+  if (b.focus) await computer.bringToFront(id);
+  return computer.status(id);
 });
-route('POST', '/api/computer/done', async () => {
-  computer.endTakeover();
-  await tools.onTakeoverEnded();
-  return computer.status();
+route('POST', '/api/computer/done', async (req, res, p, q) => {
+  const id = botParam(q, await readJson(req));
+  computer.endTakeover(id);
+  await tools.onTakeoverEnded(id);
+  return computer.status(id);
 });
-route('POST', '/api/computer/input', async (req) => {
-  if (computer.state.control !== 'user') throw new Error('Take control first');
-  return { ok: await computer.input(await readJson(req)) };
+route('POST', '/api/computer/input', async (req, res, p, q) => {
+  const b = await readJson(req);
+  const id = botParam(q, b);
+  if (computer.machine(id).control !== 'user') throw new Error('Take control first');
+  return { ok: await computer.input(id, b) };
 });
-route('POST', '/api/computer/open', async (req) => { await computer.openUrl((await readJson(req)).url); return { ok: true }; });
-route('POST', '/api/computer/focus', () => { computer.bringToFront(); return { ok: true }; });
-route('POST', '/api/computer/restart', async () => { await computer.restartBrowser(); return computer.status(); });
+route('POST', '/api/computer/open', async (req, res, p, q) => { const b = await readJson(req); await computer.openUrl(botParam(q, b), b.url); return { ok: true }; });
+route('POST', '/api/computer/focus', async (req, res, p, q) => { const id = botParam(q, await readJson(req)); await computer.ensureBrowser(id); await computer.bringToFront(id); return { ok: true }; });
+route('POST', '/api/computer/restart', async (req, res, p, q) => { const id = botParam(q, await readJson(req)); await computer.restartBrowser(id); return computer.status(id); });
 route('POST', '/api/computer/teach/start', async (req) => {
   const b = await readJson(req);
-  await computer.ensureBrowser();
-  const t = computer.startTeach({ chatId: b.chatId, botId: b.botId, goal: b.goal });
-  chats.addMessage({ chatId: b.chatId, author: 'system', botId: b.botId, text: `Recording started: ${b.goal}. Do the task once in the computer, then press Stop. Up to 10 minutes, no audio.` });
+  const t = await computer.startTeach({ chatId: b.chatId, botId: botParam(null, b), goal: b.goal });
   return { id: t.id };
 });
-route('POST', '/api/computer/teach/stop', async () => {
-  const t = computer.stopTeach();
+route('POST', '/api/computer/teach/stop', async (req, res, p, q) => {
+  const body = await readJson(req);
+  const id = body.botId || q.get('bot') || computer.teaching()?.botId;
+  const t = id && computer.stopTeach(id);
   if (!t) throw new Error('Not recording');
   if (!t.frames.length) { chats.addMessage({ chatId: t.chatId, author: 'system', text: 'Recording stopped. Nothing was captured.' }); return { ok: true }; }
-  const note = chats.addMessage({ chatId: t.chatId, author: 'system', botId: t.botId, text: `Recording stopped (${t.frames.length} frames). Drafting a skill…` });
+  const note = chats.addMessage({ chatId: t.chatId, author: 'system', botId: t.botId, text: 'Drafting a skill from what you showed it' });
   tools.draftSkillFromTeach(t).then((d) => {
-    chats.updateMessage(note.id, { text: `Recording stopped (${t.frames.length} frames). Here's the draft skill — review it before saving.` });
+    chats.updateMessage(note.id, { text: 'Skill drafted from what you showed it' });
     chats.addMessage({ chatId: t.chatId, author: 'bot', botId: t.botId, card: { type: 'skill_draft', status: 'pending', name: d.name, description: d.description, body: d.body, title: `Draft skill: ${d.name}` } });
   }).catch((e) => chats.addMessage({ chatId: t.chatId, author: 'system', text: `Couldn't draft the skill: ${e.message}` }));
   return { ok: true };
@@ -362,6 +385,7 @@ server.keepAliveTimeout = 65000;
 
 // Computer ↔ Connect apps: re-check sign-ins every few minutes.
 setInterval(() => connectors.refresh().catch(() => {}), 3 * 60 * 1000);
+computer.startIdleReaper((botId) => engine.activeRuns().some((r) => r.botId === botId));
 // Routine scheduler.
 routines.recomputeAll();
 setInterval(() => routines.tick(), 20 * 1000);
@@ -371,8 +395,12 @@ for (const f of fs.readdirSync(PATHS.runtime)) if (f.startsWith('mcp-')) fs.rmSy
 server.listen(PORT, HOST, async () => {
   console.log(`Tandem is running at http://127.0.0.1:${PORT}`);
   if (HOST === '0.0.0.0') for (const u of lanUrls()) console.log(`  on your network: ${u}/?token=${setting('access_token')}`);
-  try { await computer.ensureBrowser(); console.log('  computer browser ready'); }
-  catch (e) { console.log(`  computer browser: ${e.message}`); }
+  const migrated = await computer.migrateLegacy(chats.primaryBot()?.id).catch((e) => { console.log(`  migration: ${e.message}`); return null; });
+  if (migrated) {
+    connectors.migrateLegacy(migrated.primaryBotId);
+    console.log('  moved the shared computer: sign-ins went to your primary Bot, files to the Shared folder');
+  }
+  console.log('  each Bot gets its own computer when it starts work');
 });
 
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => {

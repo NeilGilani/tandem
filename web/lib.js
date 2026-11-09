@@ -23,7 +23,7 @@ export function h(tag, attrs, ...kids) {
     else if (k === 'class') el.className += ' ' + v;
     else if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
     else if (k === 'html') el.innerHTML = v;
-    else if (['value', 'checked', 'disabled', 'readOnly', 'selected', 'hidden'].includes(k)) el[k] = v;
+    else if (['value', 'checked', 'disabled', 'readOnly', 'selected', 'hidden', 'textContent'].includes(k)) el[k] = v;
     else if (k in el && typeof v !== 'string') el[k] = v;
     else el.setAttribute(k, v === true ? '' : v);
   }
@@ -93,20 +93,32 @@ const SHAPE_PATHS = {
 export const SHAPES = Object.keys(SHAPE_PATHS);
 export const COLORS = ['#6d5dfc', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#8b5cf6', '#14b8a6', '#64748b', '#111827'];
 
-export function avatar(bot, size = 28) {
-  const wrap = h('span.av', { style: { width: `${size}px`, height: `${size}px` } });
-  if (!bot) { wrap.innerHTML = `<svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="46" fill="var(--bg-3)"/></svg>`; return wrap; }
+export function avatar(bot, size = 28, { blink = false } = {}) {
+  const wrap = h(`span.av${blink ? '.blink' : ''}`, { style: { width: `${size}px`, height: `${size}px` } });
+  if (!bot) { wrap.innerHTML = `<svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="46" fill="var(--active)"/></svg>`; return wrap; }
   if (bot.avatar) { wrap.append(h('img', { src: bot.avatar, alt: '' })); return wrap; }
-  const initial = esc((bot.name || '?').trim()[0]?.toUpperCase() || '?');
+  // A Bot is a coloured shape with a face.
+  const eyeY = bot.shape === 'star' ? 52 : 47;
+  const gap = bot.shape === 'diamond' ? 11 : 13;
   wrap.innerHTML = `<svg viewBox="0 0 100 100"><g fill="${esc(bot.color)}">${SHAPE_PATHS[bot.shape] || SHAPE_PATHS.circle}</g>
-    <text x="50" y="${bot.shape === 'star' ? 62 : 58}" text-anchor="middle" font-size="${bot.shape === 'star' ? 30 : 40}" font-weight="700" fill="#fff" font-family="system-ui">${initial}</text></svg>`;
+    <g class="eyes"><ellipse cx="${50 - gap}" cy="${eyeY}" rx="7.5" ry="10" fill="#fff"/><ellipse cx="${50 + gap}" cy="${eyeY}" rx="7.5" ry="10" fill="#fff"/>
+    <circle cx="${50 - gap + 1.5}" cy="${eyeY + 2}" r="4" fill="#111"/><circle cx="${50 + gap + 1.5}" cy="${eyeY + 2}" r="4" fill="#111"/></g></svg>`;
   return wrap;
 }
 
-export function userAvatar(size = 28) {
-  const w = h('span.av', { style: { width: `${size}px`, height: `${size}px` } });
-  w.innerHTML = '<svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="46" fill="var(--bg-3)"/><circle cx="50" cy="40" r="16" fill="var(--text-3)"/><path d="M20 82c6-16 18-22 30-22s24 6 30 22" fill="var(--text-3)"/></svg>';
-  return w;
+// Two or three Bots stacked, for group chats.
+export function groupAvatar(bots, size = 28) {
+  const g = h('span.av-group', { style: { width: `${size}px`, height: `${size}px` } });
+  const list = bots.slice(0, 3);
+  const s = Math.round(size * (list.length > 2 ? 0.62 : 0.7));
+  const pos = list.length > 2 ? [[0, 0], [size - s, size * 0.12], [size * 0.18, size - s]] : [[0, 0], [size - s, size - s]];
+  list.forEach((b, i) => { const a = avatar(b, s); a.style.left = `${pos[i][0]}px`; a.style.top = `${pos[i][1]}px`; g.append(a); });
+  return g;
+}
+
+export function userAvatar(size = 28, name = '') {
+  const initials = String(name).trim().split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase() || 'ME';
+  return h('span.initials', { style: { width: `${size}px`, height: `${size}px` } }, initials);
 }
 
 export const logo = (app, size = 32) => h('span.logo', { style: { background: app.color || '#64748b', width: `${size}px`, height: `${size}px`, fontSize: `${Math.round(size * .42)}px` } },
@@ -135,6 +147,13 @@ const I = {
   phone: '<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/>',
   refresh: '<path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/>',
   open: '<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
+  up: '<path d="M12 19V5M5 12l7-7 7 7"/>',
+  file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>',
+  page: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/>',
+  link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+  image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/>',
+  sidebar: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>',
+  download: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>',
 };
 export function icon(name) {
   const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');

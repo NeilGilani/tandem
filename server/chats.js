@@ -26,6 +26,10 @@ export function createBot({ name, shape, color, label = '', template = null }) {
 
 const BOT_FIELDS = ['name', 'label', 'shape', 'color', 'avatar', 'section', 'pinned', 'hidden', 'notify', 'drafts'];
 export function updateBot(id, patch) {
+  const before = getBot(id);
+  if (patch.name && before && patch.name.trim() && patch.name.trim() !== before.name) {
+    setTimeout(() => addMessage({ chatId: dmFor(id).id, author: 'system', botId: id, text: `Renamed to ${patch.name.trim()}`, meta: { kind: 'rename' } }), 0);
+  }
   for (const [k, v] of Object.entries(patch)) {
     if (!BOT_FIELDS.includes(k)) continue;
     run(`UPDATE bots SET ${k} = ? WHERE id = ?`, typeof v === 'boolean' ? Number(v) : v, id);

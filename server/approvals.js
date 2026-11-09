@@ -185,12 +185,12 @@ export async function decide(tool, input, ctx) {
 
   let pageUrl = '';
   if (BROWSER_ANY.test(tool)) {
-    if (computer.state.control === 'user') {
-      computer.setActivity('Waiting, you have control');
-      await computer.waitForBotControl();
+    if (computer.machine(ctx.botId).control === 'user') {
+      computer.setActivity(ctx.botId, 'Waiting, you have control');
+      await computer.waitForBotControl(ctx.botId);
     }
-    computer.setActivity(`${chats.getBot(ctx.botId)?.name || 'Bot'}: ${describe(tool, input)}`);
-    pageUrl = (await computer.pages())[0]?.url || '';
+    computer.setActivity(ctx.botId, describe(tool, input));
+    pageUrl = (await computer.pages(ctx.botId))[0]?.url || '';
   }
   const summary = describe(tool, input);
   const detail = tool === 'Bash' ? String(input.command || '') : JSON.stringify(input);

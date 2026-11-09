@@ -130,8 +130,8 @@ export function resolveCard(msgId, payload) {
         chats.updateMessage(msgId, { card });
       });
     case 'takeover':
-      computer.endTakeover();
-      return true;
+      computer.endTakeover(msg.bot_id);
+      return onTakeoverEnded(msg.bot_id).then(() => true);
     case 'draft': {
       if (payload.action === 'discard') return done('discarded');
       const draft = { ...card, ...(payload.edits || {}) };
@@ -152,11 +152,12 @@ export function resolveCard(msgId, payload) {
 }
 
 // When a takeover ends: re-check connections and release waiting Connect cards.
-export async function onTakeoverEnded() {
-  await connectors.afterTakeover();
-  const status = Object.fromEntries(connectors.installed().map((c) => [c.id, c.status]));
+export async function onTakeoverEnded(botId) {
+  await connectors.afterTakeover(botId);
+  const status = Object.fromEntries(connectors.installed(botId).map((c) => [c.id, c.status]));
   for (const [msgId, w] of waiters) {
     const m = chats.getMessage(msgId);
+    if (m?.bot_id !== botId) continue;
     if (m?.card?.type === 'takeover') {
       waiters.delete(msgId);
       chats.updateMessage(msgId, { card: { ...m.card, status: 'done' } });
@@ -188,7 +189,7 @@ export async function call(tool, args = {}, ctx) {
   const isMacTool = tool.startsWith('mac_');
   if (isMacTool) {
     const app = CATALOG.find((c) => c.tools?.includes(tool));
-    const ok = connectors.installed().some((c) => c.catalog_id === app.id);
+    const ok = connectors.installed(ctx.botId).some((c) => c.catalog_id === app.id);
     if (!ok) return `${app.name} isn't connected. Call request_connect with "${app.name}" first.`;
     return mac.TOOLS[tool](args);
   }
@@ -200,7 +201,12 @@ export async function call(tool, args = {}, ctx) {
       if (decisionCtx.isGroup) decisionCtx.chatId = chats.dmFor(ctx.botId).id;
       return approvals.decide(args.tool_name, args.input || {}, decisionCtx);
     }
-    case 'remember': return { saved: memory.remember(ctx.botId, args.text, { aboutUser: !!args.about_user }).text };
+    case 'remember': {
+      if (!String(args.text || '').trim()) throw new Error('Pass the fact to remember in "text".');
+      const saved = memory.remember(ctx.botId, args.text, { aboutUser: !!args.about_user }).text;
+      chats.addMessage({ chatId: ctx.chatId, author: 'system', botId: ctx.botId, text: `Updated memory for ${bot.name}`, meta: { kind: 'memory', fact: saved } });
+      return { saved };
+    }
     case 'forget': return { removed: memory.forget(ctx.botId, args.query) };
     case 'recall': return memory.recall(ctx.botId);
     case 'log_work': memory.logWork(ctx.botId, args.text); return 'Logged.';
@@ -227,12 +233,12 @@ export async function call(tool, args = {}, ctx) {
     case 'delete_routine': routines.remove(args.id); return 'Deleted.';
     case 'test_routine': return routines.start(args.id, { test: true });
     case 'list_connectors':
-      return { connected: connectors.installed().map((c) => ({ name: c.name, status: c.status })), catalog: CATALOG.map((c) => c.name) };
+      return { connected: connectors.installed(ctx.botId).map((c) => ({ name: c.name, status: c.status })), catalog: CATALOG.map((c) => c.name) };
     case 'request_connect': {
       const app = findApp(args.app);
       if (!app) return `"${args.app}" isn't in the catalog. The user can add any MCP server as a custom app under Connect apps.`;
       const row = connectors.add(app.id);
-      const c = connectors.installed().find((x) => x.id === row.id);
+      const c = connectors.installed(ctx.botId).find((x) => x.id === row.id);
       if (c.status === 'Connected') return `${app.name} is connected.`;
       const msg = postCard(ctx, { type: 'connect', connectorId: c.id, name: app.name, color: app.color, title: `Connect ${app.name}` }, '');
       const res = await waitCard(msg.id, ctx);
@@ -241,22 +247,22 @@ export async function call(tool, args = {}, ctx) {
     case 'request_takeover': {
       const msg = postCard(ctx, { type: 'takeover', reason: args.reason, title: 'Take over the computer' });
       computer.startTakeover({ reason: args.reason, botId: ctx.botId, chatId: msg.chat_id });
-      computer.bringToFront();
+      computer.bringToFront(ctx.botId).catch(() => {});
       const res = await waitCard(msg.id, ctx);
-      if (res.expired && computer.state.control === 'user') computer.endTakeover();
+      if (res.expired && computer.machine(ctx.botId).control === 'user') computer.endTakeover(ctx.botId);
       return res.expired ? 'Nobody took over within 30 minutes. Report that this step needs the user.' : 'The user pressed I\'m done. Continue from the current page.';
     }
     case 'vault_list': return vault.list().map(({ name, kind, site, username }) => ({ name, kind, site, has_username: !!username }));
     case 'vault_fill_login': {
       const item = vault.find(args.name);
       if (!item) return `Nothing named "${args.name}" in the Vault. Call request_secret to ask the user to save it.`;
-      const page = (await computer.pages())[0];
+      const page = (await computer.pages(ctx.botId))[0];
       const host = page ? new URL(page.url).hostname : '';
       if (item.site && !host.endsWith(item.site.replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/^www\./, ''))) {
         return `Refused: "${item.name}" is saved for ${item.site}, but the current page is ${host}.`;
       }
       const secret = await vault.reveal(item.id);
-      const filled = await computer.fillLogin(item.username, secret);
+      const filled = await computer.fillLogin(ctx.botId, item.username, secret);
       return filled ? `Filled ${filled}. Submit the form to continue.` : 'No login fields found on this page.';
     }
     case 'request_secret': {
@@ -277,11 +283,12 @@ export async function call(tool, args = {}, ctx) {
       let kind = args.kind;
       if (!kind) kind = /^https?:/.test(args.ref) ? 'link' : /\.(png|jpe?g|gif|webp)$/i.test(args.ref) ? 'image' : /\.(mp4|mov|webm)$/i.test(args.ref) ? 'video' : /\.(md|html?)$/i.test(args.ref) ? 'page' : 'file';
       if (!/^https?:/.test(args.ref) && !fs.existsSync(args.ref)) {
-        const p = path.join(PATHS.workspace, args.ref);
+        const p = [computer.workspaceOf(ctx.botId), PATHS.shared].map((d) => path.join(d, args.ref)).find((x) => fs.existsSync(x)) || path.join(computer.workspaceOf(ctx.botId), args.ref);
         if (!fs.existsSync(p)) return `No file at ${args.ref}`;
         args.ref = p;
       }
       chats.addToLibrary({ botId: ctx.botId, kind, title: args.title, ref: args.ref });
+      chats.addMessage({ chatId: ctx.chatId, author: 'bot', botId: ctx.botId, card: { type: 'file', status: 'done', kind, title: args.title, ref: args.ref } });
       return 'Added to your Library.';
     }
     case 'notify_user':

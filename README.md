@@ -31,8 +31,8 @@ If you like it, [star the repo](https://github.com/NeilGilani/tandem).
 | Feature | How Tandem does it |
 |---|---|
 | Named Bots you message like coworkers | Each Bot keeps its own Claude Code session per conversation (`claude -p --resume`) |
-| One shared cloud computer | One shared computer: the `data/computer/workspace` folder, one Chrome profile (`data/computer/chrome-profile`) and this Mac's command line |
-| Bots use apps the way a person does | Playwright MCP drives that Chrome over CDP, and sign-ins are shared by all Bots |
+| A computer for the Bots | **Each Bot gets its own computer**: its own Chrome profile (so its own sign-ins) and its own folder under `data/computers/<bot>/`, plus a `data/shared` folder every Bot can use to hand files to each other. Browsers start when a Bot starts work, stay minimized, and close after 15 idle minutes |
+| Bots use apps the way a person does | Playwright MCP drives the Bot's own Chrome over CDP. You sign in per Bot in Connect apps |
 | Take over / I'm done | Computer panel: watch live, Take control (click and type from any device), or Take over in the real window, then press I'm done |
 | Connect apps | 70+ apps: Google, Microsoft (Outlook, Teams, OneDrive, SharePoint, Office), Slack, Notion, Linear, Jira, Salesforce, HubSpot, LinkedIn, GitHub, Stripe and more, plus Mac Calendar, Contacts, Reminders and Messages, plus any MCP server as a custom app |
 | Vault and 1Password fill | Vault stores values in your macOS Keychain. `vault_fill_login` fills sign-in forms and the Bot never sees the values |

@@ -9,9 +9,8 @@ export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 export const DATA = process.env.TANDEM_DATA || path.join(ROOT, 'data');
 export const PATHS = {
   data: DATA,
-  computer: path.join(DATA, 'computer'),
-  workspace: path.join(DATA, 'computer', 'workspace'),
-  chrome: path.join(DATA, 'computer', 'chrome-profile'),
+  computers: path.join(DATA, 'computers'), // one per Bot: <botId>/workspace and <botId>/chrome-profile
+  shared: path.join(DATA, 'shared'), // a folder every Bot can read and write
   memory: path.join(DATA, 'memory'),
   skills: path.join(DATA, 'skills'),
   uploads: path.join(DATA, 'uploads'),
@@ -74,7 +73,11 @@ CREATE TABLE IF NOT EXISTS vault (
   id TEXT PRIMARY KEY, name TEXT, kind TEXT, site TEXT, username TEXT, created INTEGER
 );
 CREATE TABLE IF NOT EXISTS sections (name TEXT PRIMARY KEY, position INTEGER);
+CREATE TABLE IF NOT EXISTS connector_status (
+  bot_id TEXT, connector_id TEXT, status TEXT, PRIMARY KEY (bot_id, connector_id)
+);
 `);
+try { db.exec('ALTER TABLE bots ADD COLUMN cdp_port INTEGER'); } catch {}
 
 export const uid = (p = '') => p + crypto.randomBytes(8).toString('hex');
 export const now = () => Date.now();
