@@ -23,6 +23,7 @@ export function h(tag, attrs, ...kids) {
     else if (k === 'class') el.className += ' ' + v;
     else if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
     else if (k === 'html') el.innerHTML = v;
+    else if (['value', 'checked', 'disabled', 'readOnly', 'selected', 'hidden'].includes(k)) el[k] = v;
     else if (k in el && typeof v !== 'string') el[k] = v;
     else el.setAttribute(k, v === true ? '' : v);
   }

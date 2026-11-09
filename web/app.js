@@ -208,6 +208,7 @@ function renderMessage(m, { inThread = false } = {}) {
   const body = h('div.body',
     h('div.meta', h('b', name), h('time', time(m.created)), m.meta?.handoff ? h('span.model', 'handoff') : null,
       m.meta?.origin === 'routine' ? h('span.model', 'routine') : null),
+    m.meta?.steps?.length > 0 ? stepsBlock(m) : null,
     m.text ? h(`div.text`, m.author === 'user' ? { textContent: m.text } : { html: md(m.text) }) : null,
     m.attachments?.length ? h('div.attach-list', m.attachments.map((a) => /\.(png|jpe?g|gif|webp)$/i.test(a.name)
       ? h('a.attach', { href: fileUrl(a.path), target: '_blank' }, h('img', { src: fileUrl(a.path), alt: a.name }))
@@ -220,6 +221,16 @@ function renderMessage(m, { inThread = false } = {}) {
       ['👍', '✅', '👀', '❤️'].map((e) => h('button', { title: 'React', on: { click: () => api('POST', `/api/messages/${m.id}/react`, { emoji: e }) } }, e)),
       !inThread && h('button', { title: 'Reply in thread', on: { click: () => { replyTo = m; renderComposer(); } } }, '↩︎'),
       m.text && h('button', { title: 'Copy', on: { click: () => { navigator.clipboard.writeText(m.text); toast('Copied'); } } }, '⧉')));
+}
+
+const dur = (ms) => { const s = Math.round(ms / 1000); return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60 ? `${s % 60}s` : ''}`.trim(); };
+
+function stepsBlock(m) {
+  const steps = m.meta.steps;
+  const tools = steps.filter((x) => x.k === 'tool').length;
+  const label = `Worked for ${dur(m.meta.duration || 0)}${tools ? `, ${tools} step${tools === 1 ? '' : 's'}` : ''}`;
+  return h('details.steps', h('summary', label),
+    h('ol', steps.map((x) => h(`li.${x.k}`, x.k === 'text' ? { html: md(x.t) } : x.t))));
 }
 
 function renderMessages(chatId) {
@@ -242,7 +253,8 @@ function renderMessages(chatId) {
 function statusLine(chatId) {
   const runs = runsIn(chatId);
   if (!runs.length) return null;
-  return runs.map((r) => h('div.status-line', h('span.spin'), h('b', bot(r.botId)?.name || 'Bot'), h('span', r.status)));
+  return runs.map((r) => h('div.status-line', h('span.spin'), h('b', bot(r.botId)?.name || 'Bot'),
+    h('span.st', r.status), h('span.el', [dur(Date.now() - r.started), r.steps ? `${r.steps} steps` : ''].filter(Boolean).join(', '))));
 }
 
 let $messages, $status, $composer, currentChatId = null;
@@ -333,28 +345,28 @@ function renderCard(m) {
   if (c.type === 'approval') {
     const commandCard = c.kind === 'command';
     const ruleCard = c.kind === 'rule';
+    const details = c.command
+      ? h('details.cmd-details', h('summary', 'Show command'), h('pre', c.command))
+      : c.inputs && h('details.cmd-details', h('summary', 'Show details'), h('pre', c.inputs));
+    // Once answered, an approval shrinks to a single quiet line.
+    if (!pending) {
+      const word = { allowed: 'Allowed', denied: 'Denied', expired: 'Expired' }[c.status] || c.status;
+      return h(`div.approval-done.${c.status}`, h('span.dot-s'), h('span', `${word}: ${c.summary}`), c.saved && h('span.saved', c.saved.replace(/^Saved: /, 'Always allowed: ')), details);
+    }
     return h('div.card',
-      h('div.card-h', '🔐 ', commandCard ? 'Run a command on this computer?' : 'Approve this action?', statusPill(c.status)),
+      h('div.card-h', commandCard ? 'Run a command on this computer?' : 'Approve this action?', statusPill(c.status)),
       h('div.card-b',
-        h('div', c.summary),
+        h('div.card-title', c.summary, c.site && h('span.hint', ` on ${c.site}`)),
         c.reason && h('div.hint', c.reason),
-        (c.warnings || []).map((w) => h('div.warn', '⚠︎ ', w)),
-        h('details', h('summary.hint', 'Inputs'), h('pre', c.inputs)),
-        c.saved && h('div.hint', c.saved),
-        c.expires && pending && h('div.hint', `Expires ${time(c.expires)}`)),
-      pending && h('div.card-actions',
-        commandCard
-          ? [h('button.btn.primary', { on: { click: () => cardAction(m, { choice: 'allow' }) } }, 'Allow'),
-            h('button.btn', { on: { click: () => cardAction(m, { choice: 'deny' }) } }, 'Skip'),
-            c.allowAlways && h('button.btn', { on: { click: () => cardAction(m, { choice: 'always' }) } }, 'Always allow'),
-            h('button.btn.ghost', { on: { click: () => go('#/settings/computer') } }, 'Manage settings')]
-          : ruleCard
-            ? [h('button.btn.primary', { on: { click: () => cardAction(m, { choice: 'allow' }) } }, 'Allow'),
-              h('button.btn', { on: { click: () => cardAction(m, { choice: 'deny' }) } }, 'Not now'),
-              h('button.btn.ghost', { on: { click: () => go('#/settings/general') } }, 'Edit rule')]
-            : [h('button.btn.primary', { on: { click: () => cardAction(m, { choice: 'allow' }) } }, c.allowAlways ? 'Allow once' : 'Allow'),
-              c.allowAlways && h('button.btn', { on: { click: () => cardAction(m, { choice: 'always' }) } }, 'Always allow'),
-              h('button.btn.danger', { on: { click: () => cardAction(m, { choice: 'deny' }) } }, 'Deny')]));
+        (c.warnings || []).map((w) => h('div.warn', w)),
+        details,
+        c.expires && h('div.hint', `Expires at ${time(c.expires)}`)),
+      h('div.card-actions',
+        h('button.btn.primary', { on: { click: () => cardAction(m, { choice: 'allow' }) } }, c.allowAlways ? 'Allow once' : 'Allow'),
+        c.allowAlways && h('button.btn', { on: { click: () => cardAction(m, { choice: 'always' }) } }, c.alwaysLabel || 'Always allow'),
+        h('button.btn.danger', { on: { click: () => cardAction(m, { choice: 'deny' }) } }, commandCard ? 'Skip' : ruleCard ? 'Not now' : 'Deny'),
+        commandCard && h('button.btn.ghost', { on: { click: () => go('#/settings/computer') } }, 'Settings'),
+        ruleCard && h('button.btn.ghost', { on: { click: () => go('#/settings/general') } }, 'Edit rule')));
   }
 
   if (c.type === 'draft') {
@@ -366,7 +378,7 @@ function renderCard(m) {
     };
     const edits = () => Object.fromEntries(Object.entries(inputs).map(([k, el]) => [k, el.value]));
     return h('div.card',
-      h('div.card-h', `✉︎ ${c.app} draft`, statusPill(c.status)),
+      h('div.card-h', `${c.app} draft`, statusPill(c.status)),
       h('div.card-b', field('to', 'To'), (c.cc || pending) && field('cc', 'Cc'), (c.subject || /mail|outlook/i.test(c.app)) && field('subject', 'Subject'), field('body', '', true),
         c.thread && h('div.hint', `In reply to: ${c.thread}`)),
       pending && h('div.card-actions',
@@ -386,7 +398,7 @@ function renderCard(m) {
       if (answer) cardAction(m, { answer });
     };
     const cardEl = h('div.card',
-      h('div.card-h', '❓ Question', statusPill(c.status)),
+      h('div.card-h', 'Question', statusPill(c.status)),
       h('div.card-b', h('div', c.question), pending ? answerBox : h('div.hint', `Answer: ${c.answer}`)),
       pending && h('div.card-actions', (c.options || []).map((o) => h('button.btn', { on: { click: () => submit(o) } }, o)),
         (answerBox.length > 0) && h('button.btn.primary', { on: { click: () => submit() } }, 'Submit')));
@@ -397,7 +409,7 @@ function renderCard(m) {
     const user = h('input.input', { value: c.username || '', placeholder: 'Username or email', autocomplete: 'off' });
     const secret = h('input.input', { type: 'password', placeholder: c.kind === 'secret' ? 'Secret value' : 'Password', autocomplete: 'new-password' });
     return h('div.card',
-      h('div.card-h', '🔑 ', c.title, statusPill(c.status)),
+      h('div.card-h', c.title, statusPill(c.status)),
       h('div.card-b', h('div', c.purpose), c.site && h('div.hint', `For ${c.site}`),
         pending && [c.kind !== 'secret' && user, secret, h('div.hint', 'Saved to your Mac Keychain. The Bot never sees it — the Vault fills it for the Bot.')]),
       pending && h('div.card-actions',
@@ -418,7 +430,7 @@ function renderCard(m) {
 
   if (c.type === 'takeover') {
     return h('div.card',
-      h('div.card-h', '✋ Take over the computer', statusPill(c.status)),
+      h('div.card-h', 'Take over the computer', statusPill(c.status)),
       h('div.card-b', h('div', c.reason), h('div.hint', 'Complete only that step in the computer, then press I\'m done.')),
       pending && h('div.card-actions',
         h('button.btn', { on: { click: () => { toggleComputer(true); api('POST', '/api/computer/focus'); } } }, 'Take over'),
@@ -430,7 +442,7 @@ function renderCard(m) {
     const desc = h('input.input', { value: c.description, disabled: !pending });
     const body = h('textarea.textarea', { value: c.body, rows: 12, disabled: !pending, style: { fontFamily: 'var(--mono)', fontSize: '12px' } });
     return h('div.card', { style: { maxWidth: '680px' } },
-      h('div.card-h', '📘 ', c.title, statusPill(c.status)),
+      h('div.card-h', c.title, statusPill(c.status)),
       h('div.card-b', h('div.field', h('label', 'Name'), name), h('div.field', h('label', 'Description'), desc), body,
         pending && h('div.hint', 'This is a draft from one demonstration. Add decision rules, failure handling and approval boundaries before scheduling it.')),
       pending && h('div.card-actions',
@@ -671,6 +683,11 @@ on('notify', (n) => {
     note.onclick = () => { window.focus(); go(`#/chat/${n.chatId}`); };
   } else toast(`${n.title}: ${n.body}`);
 });
+
+// Keep the elapsed time on the status line ticking.
+setInterval(() => {
+  if (currentChatId && $status?.isConnected && runsIn(currentChatId).length) $status.replaceChildren(...[statusLine(currentChatId)].flat().filter(Boolean));
+}, 1000);
 
 // ---------- Keyboard shortcuts ---------------------------------------------------------------
 document.addEventListener('keydown', (e) => {

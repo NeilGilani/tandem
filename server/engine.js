@@ -59,6 +59,7 @@ function mcpConfig(runCtx) {
 function toolStatus(name, input) {
   if (name.startsWith('mcp__playwright__browser_')) return approvals.describe(name, input).replace(/^Click/, 'Clicking').replace(/^Type/, 'Typing') ||
     'Using the browser';
+  if (name === 'Bash' && input.description) return input.description.replace(/\.$/, '');
   const map = { Bash: 'Running a command', Read: 'Reading files', Write: 'Writing a file', Edit: 'Editing a file', Grep: 'Searching files', Glob: 'Looking for files', WebSearch: 'Searching the web', WebFetch: 'Reading a web page' };
   if (map[name]) return map[name];
   if (name === 'mcp__playwright__browser_navigate') return `Opening ${input.url}`;
@@ -111,7 +112,7 @@ function start(botId, chatId, text, opts) {
   if (!bot || !chat) return Promise.resolve({ error: 'Bot or chat not found' });
   const id = uid('run_');
   const model = opts.model || pickModel(text, { origin: opts.origin, attachments: (opts.attachments || []).length });
-  const runCtx = { id, botId, chatId, origin: opts.origin, model, status: 'Thinking…', started: now(), messageId: null, text: '', opts };
+  const runCtx = { id, botId, chatId, origin: opts.origin, model, status: 'Thinking', started: now(), messageId: null, text: '', opts, steps: [], tail: [] };
   const key = `${chatId}:${botId}`;
 
   let fullText = text;
@@ -151,7 +152,7 @@ function start(botId, chatId, text, opts) {
   active.set(key, runCtx);
   emit('run', publicRun(runCtx));
 
-  let buf = '', stderr = '', resultEvt = null, sawText = false;
+  let buf = '', stderr = '', resultEvt = null;
   child.stdout.on('data', (d) => {
     buf += d;
     let i;
@@ -172,25 +173,34 @@ function start(botId, chatId, text, opts) {
       chats.setSession(chatId, botId, evt.session_id);
     } else if (evt.type === 'assistant') {
       for (const block of evt.message?.content || []) {
-        if (block.type === 'text' && block.text.trim()) appendText(block.text.trim());
-        else if (block.type === 'tool_use') setStatus(toolStatus(block.name, block.input || {}));
-        else if (block.type === 'thinking') setStatus('Thinking…');
+        if (block.type === 'text' && block.text.trim()) {
+          const t = block.text.trim();
+          runCtx.steps.push({ k: 'text', t });
+          runCtx.tail.push(t);
+          setStatus(t.split('\n')[0].slice(0, 120));
+        } else if (block.type === 'tool_use') {
+          const label = toolStatus(block.name, block.input || {});
+          runCtx.steps.push({ k: 'tool', t: label });
+          runCtx.tail = [];
+          setStatus(label);
+        } else if (block.type === 'thinking') setStatus('Thinking');
       }
     } else if (evt.type === 'result') {
       resultEvt = evt;
     }
   }
 
-  function appendText(t) {
-    if (chat.kind === 'group' && /^PASS\.?$/i.test(t)) return;
-    sawText = true;
-    runCtx.text = runCtx.text ? `${runCtx.text}\n\n${t}` : t;
-    if (!runCtx.messageId) {
-      const m = chats.addMessage({ chatId, author: 'bot', botId, text: runCtx.text, parentId: opts.parentId || null, meta: { runId: id, model, origin: opts.origin } });
-      runCtx.messageId = m.id;
-    } else {
-      chats.updateMessage(runCtx.messageId, { text: runCtx.text });
-    }
+  // One message per turn: the final answer, with the work that led to it folded into steps.
+  function postFinal(finalText) {
+    const t = (finalText || '').trim();
+    if (!t || (chat.kind === 'group' && /^PASS\.?$/i.test(t))) return;
+    const tailSet = new Set(runCtx.tail);
+    const steps = runCtx.steps.filter((x) => !(x.k === 'text' && (tailSet.has(x.t) || t.includes(x.t))))
+      .slice(-80).map((x) => ({ k: x.k, t: x.t.slice(0, 600) }));
+    runCtx.text = t;
+    const m = chats.addMessage({ chatId, author: 'bot', botId, text: t, parentId: opts.parentId || null,
+      meta: { runId: id, model, origin: opts.origin, steps, duration: now() - runCtx.started } });
+    runCtx.messageId = m.id;
   }
 
   child.on('close', (code) => {
@@ -204,7 +214,7 @@ function start(botId, chatId, text, opts) {
         uid('u_'), botId, model, resultEvt.total_cost_usd || 0,
         (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0), u.output_tokens || 0, opts.origin, now());
       if (resultEvt.is_error) error = resultEvt.result || resultEvt.subtype || 'Run failed';
-      else if (!sawText && resultEvt.result && !(chat.kind === 'group' && /^PASS\.?$/i.test(resultEvt.result.trim()))) appendText(resultEvt.result.trim());
+      else postFinal(resultEvt.result || runCtx.tail.join('\n\n'));
     } else if (!runCtx.stopped) {
       error = stderr.trim().split('\n').slice(-3).join(' ') || `Claude Code exited with code ${code}`;
     }
@@ -217,6 +227,7 @@ function start(botId, chatId, text, opts) {
     if (error && !runCtx.stopped) {
       chats.addMessage({ chatId, author: 'system', botId, text: `${bot.name} hit a problem: ${error}`, meta: { error: true } });
     }
+    if (!resultEvt && runCtx.stopped && runCtx.tail.length) postFinal(runCtx.tail.join('\n\n'));
     if (runCtx.stopped && !runCtx.silentStop) chats.addMessage({ chatId, author: 'system', botId, text: `${bot.name} stopped. Work already done isn't undone.` });
     runCtx.status = 'done';
     emit('run', { ...publicRun(runCtx), ended: true });
@@ -244,7 +255,7 @@ export function stopChat(chatId) {
   for (const r of active.values()) if (r.chatId === chatId) stop(r.id);
 }
 
-const publicRun = (r) => ({ id: r.id, botId: r.botId, chatId: r.chatId, status: r.status, model: r.model, origin: r.origin, started: r.started });
+const publicRun = (r) => ({ id: r.id, botId: r.botId, chatId: r.chatId, status: r.status, model: r.model, origin: r.origin, started: r.started, steps: r.steps?.length || 0 });
 export const activeRuns = () => [...active.values()].map(publicRun);
 
 // ---- Entry points -------------------------------------------------------------------
