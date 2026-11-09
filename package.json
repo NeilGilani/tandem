@@ -1,0 +1,16 @@
+{
+  "name": "tandem",
+  "version": "0.1.0",
+  "description": "Persistent AI coworker Bots on your own computer, powered by Claude Code.",
+  "type": "module",
+  "private": true,
+  "bin": { "tandem": "bin/tandem" },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js"
+  },
+  "engines": { "node": ">=22.13" },
+  "dependencies": {
+    "@playwright/mcp": "0.0.85"
+  }
+}

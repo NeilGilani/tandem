@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# Tandem launcher.
+#   tandem start [--lan]   run in this terminal (Ctrl-C to stop)
+#   tandem install [--lan] run in the background, start at login, restart if it crashes
+#   tandem uninstall       stop the background service
+#   tandem open            open the app in your browser
+#   tandem status | logs
+set -euo pipefail
+DIR="$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")/.." && pwd)"
+LABEL="com.tandem.daemon"
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+DATA="${TANDEM_DATA:-$DIR/data}"
+PORT="${PORT:-4747}"
+URL="http://127.0.0.1:$PORT"
+
+need() { command -v "$1" >/dev/null 2>&1 || { echo "Tandem needs '$1' on your PATH. $2" >&2; exit 1; }; }
+
+case "${1:-start}" in
+  start)
+    need node "Install Node 22.13+ (brew install node)."
+    need claude "Install Claude Code and sign in: https://claude.com/claude-code"
+    [ -d "$DIR/node_modules/@playwright/mcp" ] || (cd "$DIR" && npm install --silent)
+    shift || true
+    exec node "$DIR/server/index.js" "$@"
+    ;;
+  install)
+    need node "Install Node 22.13+ (brew install node)."
+    need claude "Install Claude Code and sign in: https://claude.com/claude-code"
+    [ -d "$DIR/node_modules/@playwright/mcp" ] || (cd "$DIR" && npm install --silent)
+    mkdir -p "$DATA" "$HOME/Library/LaunchAgents"
+    LAN_ARG=""; [ "${2:-}" = "--lan" ] && LAN_ARG="<string>--lan</string>"
+    NODE_BIN="$(command -v node)"; CLAUDE_DIR="$(dirname "$(command -v claude)")"
+    cat > "$PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>$LABEL</string>
+  <key>ProgramArguments</key><array><string>$NODE_BIN</string><string>$DIR/server/index.js</string>$LAN_ARG</array>
+  <key>WorkingDirectory</key><string>$DIR</string>
+  <key>EnvironmentVariables</key><dict>
+    <key>PATH</key><string>$CLAUDE_DIR:$(dirname "$NODE_BIN"):/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>HOME</key><string>$HOME</string>
+    <key>PORT</key><string>$PORT</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>$DATA/tandem.log</string>
+  <key>StandardErrorPath</key><string>$DATA/tandem.log</string>
+</dict></plist>
+EOF
+    launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
+    launchctl bootstrap "gui/$(id -u)" "$PLIST"
+    echo "Tandem is running in the background and starts at login: $URL"
+    ;;
+  uninstall)
+    launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
+    rm -f "$PLIST"
+    echo "Background service removed. Your Bots and data are kept in $DATA."
+    ;;
+  open) open "$URL" ;;
+  status)
+    if curl -fsS "$URL/api/computer/status" >/dev/null 2>&1; then echo "Running at $URL"; else echo "Not running"; fi
+    ;;
+  logs) tail -n 100 -f "$DATA/tandem.log" ;;
+  *) sed -n '2,8p' "$0"; exit 1 ;;
+esac

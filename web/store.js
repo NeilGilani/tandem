@@ -1,0 +1,74 @@
+// App state shared by every view, kept fresh by server-sent events.
+import { api } from './lib.js';
+
+export const S = {
+  bots: [], chats: [], sections: [], runs: [], connectors: [], settings: {}, computer: {},
+  messages: {}, // chatId -> [messages]
+  showComputer: (() => { try { return localStorage.getItem('tandem.computer') === '1'; } catch { return false; } })(),
+  route: routeFromHash(),
+};
+
+function routeFromHash() {
+  const [name, id, sub] = location.hash.replace(/^#\/?/, '').split('/');
+  return name ? { name, id, sub } : { name: 'home' };
+}
+
+const listeners = new Map();
+export function on(evt, fn) { (listeners.get(evt) || listeners.set(evt, new Set()).get(evt)).add(fn); }
+export function fire(evt, data) { for (const fn of listeners.get(evt) || []) fn(data); }
+
+export async function refresh() {
+  const st = await api('GET', '/api/state');
+  Object.assign(S, st);
+  fire('state');
+}
+
+export const bot = (id) => S.bots.find((b) => b.id === id);
+export const chat = (id) => S.chats.find((c) => c.id === id);
+export const dmOf = (botId) => S.chats.find((c) => c.kind === 'dm' && c.bot_ids[0] === botId);
+export const runsIn = (chatId) => S.runs.filter((r) => r.chatId === chatId);
+
+export function go(hash) {
+  if (location.hash !== hash) location.hash = hash;
+  else parseRoute();
+}
+
+export function parseRoute() {
+  S.route = routeFromHash();
+  fire('route');
+}
+
+export function toggleComputer(force) {
+  S.showComputer = force ?? !S.showComputer;
+  try { localStorage.setItem('tandem.computer', S.showComputer ? '1' : '0'); } catch {}
+  fire('computer-toggle');
+}
+
+let es;
+export function connectEvents() {
+  es?.close();
+  es = new EventSource('/api/events');
+  const refreshing = new Set(['bots', 'chats', 'connectors', 'settings']);
+  for (const t of refreshing) es.addEventListener(t, () => refresh());
+  es.addEventListener('message', (e) => {
+    const m = JSON.parse(e.data);
+    const list = S.messages[m.chat_id];
+    if (list) {
+      const i = list.findIndex((x) => x.id === m.id);
+      if (i >= 0) list[i] = m; else list.push(m);
+    }
+    const c = chat(m.chat_id);
+    if (c) c.updated = Date.now();
+    fire('message', m);
+  });
+  es.addEventListener('run', (e) => {
+    const r = JSON.parse(e.data);
+    S.runs = S.runs.filter((x) => !(x.chatId === r.chatId && x.botId === r.botId));
+    if (!r.ended) S.runs.push(r);
+    fire('run', r);
+  });
+  es.addEventListener('computer', (e) => { S.computer = JSON.parse(e.data); fire('computer'); });
+  for (const t of ['routines', 'skills', 'library', 'teach.limit']) es.addEventListener(t, (e) => fire(t, JSON.parse(e.data || '{}')));
+  es.addEventListener('notify', (e) => fire('notify', JSON.parse(e.data)));
+  es.onerror = () => { setTimeout(() => { if (es.readyState === 2) connectEvents(); }, 3000); };
+}
