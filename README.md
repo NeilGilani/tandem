@@ -4,7 +4,7 @@
 do, and come back with the job done. Free and open source. Bots run on the Claude Code plan
 you already have.
 
-**Website:** https://neilgilani.github.io/tandem
+**Website:** https://tandem-c6l.pages.dev
 
 ## Install
 
