@@ -44,11 +44,27 @@ final class Server {
         }.resume()
     }
 
+    var watchdog: Timer?
+    var onRestarted: (() -> Void)?
+
     func start() {
         isUp { up in
             // Another Tandem (Terminal or login item) is already serving: just use it.
-            if up { return }
-            DispatchQueue.main.async { self.launch() }
+            if !up { DispatchQueue.main.async { self.launch() } }
+        }
+        // If that other Tandem stops, or ours crashes, take over so Bots keep working.
+        watchdog = Timer.scheduledTimer(withTimeInterval: 4, repeats: true) { [weak self] _ in
+            guard let self, !self.stopping else { return }
+            if self.process?.isRunning == true { return }
+            self.isUp { up in
+                if up { return }
+                DispatchQueue.main.async {
+                    guard self.process?.isRunning != true else { return }
+                    self.restarts = 0
+                    self.launch()
+                    self.onRestarted?()
+                }
+            }
         }
     }
 
@@ -245,6 +261,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         buildMainMenu()
         server.start()
         wc = WindowController()
+        server.onRestarted = { [weak self] in DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { self?.wc.load() } }
         wc.onMessage = { [weak self] type, body in self?.handle(type, body) }
         wc.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
