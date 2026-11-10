@@ -17,6 +17,7 @@ import * as memory from './memory.js';
 import * as vault from './vault.js';
 import { TEMPLATES } from './templates.js';
 import * as activity from './activity.js';
+import { CLAUDE_BIN, childEnv } from './claude.js';
 import * as toolbox from './toolbox.js';
 import * as squads from './squads.js';
 import * as missions from './missions.js';
@@ -295,7 +296,7 @@ route('GET', '/api/activity', (req, res, p, q) => {
 // Setup checks for the first-run screen: Claude Code signed in, and a browser available.
 route('GET', '/api/health', async () => {
   const { execFile } = await import('node:child_process');
-  const claude = await new Promise((resolve) => execFile(process.env.TANDEM_CLAUDE || 'claude', ['auth', 'status'], { timeout: 15000 }, (err, out) => {
+  const claude = await new Promise((resolve) => execFile(CLAUDE_BIN, ['auth', 'status'], { timeout: 15000, env: childEnv() }, (err, out) => {
     if (err && !out) return resolve({ installed: false, loggedIn: false });
     try { const j = JSON.parse(out); resolve({ installed: true, loggedIn: !!j.loggedIn, method: j.authMethod }); } catch { resolve({ installed: true, loggedIn: false }); }
   }));

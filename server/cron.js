@@ -17,7 +17,8 @@ function field(spec, [lo, hi]) {
 export function parse(expr) {
   const parts = String(expr).trim().split(/\s+/);
   if (parts.length !== 5) throw new Error('Cron needs 5 fields');
-  const f = parts.map((p, i) => field(p.replace(/^7$/, '0'), RANGES[i]));
+  // 7 means Sunday only in the day-of-week field (7am is not midnight).
+  const f = parts.map((p, i) => field(i === 4 ? p.replace(/^7$/, '0') : p, RANGES[i]));
   return { min: f[0], hour: f[1], dom: f[2], mon: f[3], dow: f[4], domStar: parts[2] === '*', dowStar: parts[4] === '*' };
 }
 
