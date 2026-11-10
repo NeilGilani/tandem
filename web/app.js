@@ -9,6 +9,7 @@ import { startCall } from './voice.js';
 import { renderHome as renderHomePage, refreshHome } from './home.js';
 import { cheer } from './alive.js';
 import { openQuickAsk } from './quickask.js';
+import { renderMissions, newMission, missionCard, openMission, progress as missionProgress } from './missions.js';
 
 const $sidebar = document.getElementById('sidebar');
 const $main = document.getElementById('main');
@@ -168,6 +169,9 @@ function renderSidebar() {
     h('div.sb-scroll',
       h(`button.nav-row${S.route.name === 'home' ? '.active' : ''}`, { on: { click: () => go('#/home') } }, icon('home'), h('span', 'Home'),
         S.pending.length ? h('span.badge', String(S.pending.length)) : null),
+      h(`button.nav-row${S.route.name === 'missions' ? '.active' : ''}`, { on: { click: () => go('#/missions') } }, icon('target'), h('span', 'Missions'),
+        (S.missions || []).filter((m) => m.status === 'blocked').length ? h('span.badge', String(S.missions.filter((m) => m.status === 'blocked').length))
+          : (S.missions || []).filter((m) => ['active', 'waiting'].includes(m.status)).length ? h('span.count-soft', String(S.missions.filter((m) => ['active', 'waiting'].includes(m.status)).length)) : null),
       h(`button.nav-row${S.route.name === 'activity' ? '.active' : ''}`, { on: { click: () => go('#/activity') } }, icon('activity'), h('span', 'Activity')),
       S.bots.length === 0 && h('div.hint', { style: { padding: '8px 10px' } }, 'No Bots yet.'),
       o.primary.map(chatRow),
@@ -281,6 +285,7 @@ function sysLine(m) {
       k === 'handoff' ? ['Sending to', chipFor(to)] : ['Message from', chipFor(to)]);
     return [line, openDetails.has(m.id) && m.meta.detail ? h('div.sys-detail', m.meta.detail) : null];
   }
+  if (k === 'mission') return h('button.sys.clickable', { on: { click: () => openMission(m.meta.missionId) } }, icon('target'), m.text);
   return h(`div.sys${m.meta?.error ? '.error' : ''}`, m.text);
 }
 
@@ -500,6 +505,7 @@ function renderChat(chatId) {
     h('button.icon-btn.back-btn', { on: { click: () => go('#/') } }, icon('back')),
     h('button.title', { title: 'Conversation details (⌘⇧I)', on: { click: () => isGroup ? newGroup(c) : openBotDrawer(b.id) } },
       isGroup ? groupAvatar(members, 24) : avatar(b, 24), h('span', isGroup ? c.name : b?.name)),
+    !isGroup && missionPill(b.id),
     h('div.spacer'),
     !isGroup && h('button.icon-btn', { title: 'Start voice chat', on: { click: () => startCall(chatId) } }, icon('phone')),
     h('button.icon-btn', { title: 'Computer', on: { click: () => toggleComputer() } }, icon('monitor')),
@@ -519,6 +525,14 @@ function renderChat(chatId) {
   else $messages.replaceChildren(h('div.msg-wrap', h('div.skel', h('div'), h('div'), h('div'))));
   animateNew = false;
   loadMessages(chatId).then(() => { if (currentChatId === chatId) { paintMessages(); animateNew = true; } });
+}
+
+function missionPill(botId) {
+  const m = (S.missions || []).find((x) => x.bot_id === botId && ['active', 'waiting', 'blocked', 'paused'].includes(x.status));
+  if (!m) return null;
+  const p = missionProgress(m.plan);
+  return h(`button.mission-pill${m.status === 'blocked' ? '.bad' : ''}`, { title: 'Open mission', on: { click: () => openMission(m.id) } },
+    icon('target'), h('span', m.title), p.total ? h('b', `${p.done}/${p.total}`) : null);
 }
 
 export function teachTask(botId, chatId) {
@@ -707,6 +721,7 @@ function mentionCandidates(c, q) {
 
 // Slash commands in the message box.
 const SLASH = [
+  { name: 'mission', hint: 'Hand off something big, for hours or days', arg: 'the goal', wrap: (a) => `Take this on as a mission and own it until it's done. Confirm the done criteria in one line, then start: ${a}` },
   { name: 'routine', hint: 'Do something on a schedule', arg: 'what and when', wrap: (a) => `Set up a routine: ${a}` },
   { name: 'remember', hint: 'Save a fact or rule', arg: 'what to remember', wrap: (a) => `Remember this: ${a}` },
   { name: 'draft', hint: 'Draft something for your review', arg: 'what to draft', wrap: (a) => `Draft this for my review, and don't send it: ${a}` },
@@ -830,6 +845,7 @@ function renderComposer() {
     const r = e.currentTarget.getBoundingClientRect();
     menu(r.left, r.top - 130, [
       { label: 'Attach files', onClick: () => fileInput.click() },
+      ...(!isGroup ? [{ label: 'Start a mission', onClick: () => newMission(c.bot_ids[0]) }] : []),
       ...(!isGroup ? [{ label: 'Start voice chat', onClick: () => startCall(currentChatId) }, { label: 'Teach a task', onClick: () => teachTask(c.bot_ids[0], currentChatId) }] : []),
       { label: 'Mention a Bot or app', onClick: () => { ta.value += (ta.value && !ta.value.endsWith(' ') ? ' ' : '') + '@'; ta.focus(); updateMention(); } },
     ]);
@@ -849,7 +865,7 @@ function renderComposer() {
 }
 
 // ---------- Home ---------------------------------------------------------------------------------
-const homeDeps = () => ({ renderCard, planBars });
+const homeDeps = () => ({ renderCard, planBars, missionCard, newMission });
 function renderHome() {
   currentChatId = null;
   if (needsOnboarding()) return renderOnboarding($main);
@@ -877,6 +893,8 @@ export function openPalette() {
     { label: 'New group chat', sub: '⌘⇧N', run: () => newGroup() },
     { label: 'Connect apps', sub: '⌘⇧M', run: () => go('#/apps') },
     { label: 'Home', run: () => go('#/home') },
+    { label: 'Missions', run: () => go('#/missions') },
+    { label: 'Start a mission', run: () => newMission() },
     { label: 'Skills', run: () => go('#/skills') },
     { label: 'Activity', run: () => go('#/activity') },
     { label: 'Bot templates', run: () => go('#/templates') },
@@ -947,6 +965,7 @@ function render() {
     else if (r.name === 'settings') renderSettings($main, r);
     else if (r.name === 'templates') renderTemplates($main, r);
     else if (r.name === 'activity') renderActivity($main, r);
+    else if (r.name === 'missions') renderMissions($main);
     else renderHome();
   }
   renderComputer();
@@ -996,6 +1015,15 @@ window.tandemNewBot = () => newBot();
 let actTimer;
 on('activity', () => { if (S.route.name !== 'activity') return; clearTimeout(actTimer); actTimer = setTimeout(() => renderActivity($main), 800); });
 on('usage', () => renderSidebar());
+on('mission', () => {
+  renderSidebar();
+  homeSoon();
+  if (currentChatId && S.route.name === 'chat') {
+    const head = $main.querySelector('.chat-head');
+    const c = chat(currentChatId);
+    if (head && c?.kind === 'dm') { head.querySelector('.mission-pill')?.remove(); const pill = missionPill(c.bot_ids[0]); if (pill) head.querySelector('.title').after(pill); }
+  }
+});
 on('computer-toggle', () => { $app.classList.toggle('with-computer', S.showComputer); renderComputer(); });
 on('computer', () => { renderComputer(); renderTeachBar(); if (currentChatId) paintWorking(); });
 on('notify', (n) => {

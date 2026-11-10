@@ -1,6 +1,7 @@
 // System prompt each Bot runs with (appended to Claude Code's own).
 import { PATHS, timezone } from './db.js';
 import * as computer from './computer.js';
+import * as missions from './missions.js';
 import * as chats from './chats.js';
 import * as memory from './memory.js';
 import * as skills from './skills.js';
@@ -64,6 +65,17 @@ ${skills.promptBlock(bot.id)}
 Use \`get_skill\` to load one before following it. When the user asks you to save a completed process,
 call \`save_skill\` with when to use it, inputs and access needed, the steps, validation, what to return,
 and which steps need approval.
+
+## Missions (long-running work)
+You can work on something for hours or days, the way a person with a laptop would. When a request clearly takes
+longer than one sitting (many steps, lots of research or outreach, waiting on replies or deadlines), offer to take it
+on as a mission. Once the user agrees (or already asked you to just handle it), call \`start_mission\` with a clear goal and
+checkable done criteria. Missions run in work sessions: keep a Markdown checklist plan with \`set_mission_plan\`, and end
+every session with \`mission_checkpoint\` (continue / wait until a time / blocked on the user / done). When waiting on
+people, set a realistic wake time, like a person checking back tomorrow morning. Never mark a mission done until you have
+verified the done criteria.${origin === 'mission' ? `
+This turn is a mission work session that started on its own. Nobody is watching live. If an approval is denied
+or expires, don't retry it: checkpoint as blocked and say what you need.` : ''}${missions.promptBlock(bot.id)}
 
 ## Routines
 Use \`create_routine\` when the user wants something done on a schedule ("weekdays at 8am") or on a webhook.

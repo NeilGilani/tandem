@@ -43,7 +43,7 @@ function mcpConfig(runCtx) {
         TANDEM_URL: `http://127.0.0.1:${PORT}`,
         TANDEM_TOKEN: setting('access_token'),
         TANDEM_BOT: runCtx.botId, TANDEM_CHAT: runCtx.chatId, TANDEM_RUN: runCtx.id, TANDEM_ORIGIN: runCtx.origin,
-        TANDEM_DEPTH: String(runCtx.opts.depth || 0), TANDEM_PREAPPROVED: runCtx.opts.preapproved ? '1' : '0',
+        TANDEM_DEPTH: String(runCtx.opts.depth || 0), TANDEM_PREAPPROVED: runCtx.opts.preapproved ? '1' : '0', TANDEM_MISSION: runCtx.missionId || '',
       },
     },
     playwright: {
@@ -101,7 +101,7 @@ function groupTranscript(chat, botId) {
  * opts: { origin: 'chat'|'routine'|'handoff'|'system', attachments, replyTo, depth, preapproved, parentId }
  */
 export function runBot(botId, chatId, text, opts = {}) {
-  const key = `${chatId}:${botId}`;
+  const key = `${opts.sessionKey || chatId}:${botId}`;
   const origin = opts.origin || 'chat';
   const current = active.get(key);
   if (current) {
@@ -130,8 +130,8 @@ function start(botId, chatId, text, opts) {
   if (!bot || !chat) return Promise.resolve({ error: 'Bot or chat not found' });
   const id = uid('run_');
   const model = opts.model || pickModel(text, { origin: opts.origin, attachments: (opts.attachments || []).length });
-  const runCtx = { id, botId, chatId, origin: opts.origin, model, status: 'Thinking', started: now(), messageId: null, text: '', opts, steps: [], tail: [], toolActs: new Map(), trail: [], live: '' };
-  const key = `${chatId}:${botId}`;
+  const runCtx = { id, botId, chatId, missionId: opts.missionId || null, origin: opts.origin, model, status: 'Thinking', started: now(), messageId: null, text: '', opts, steps: [], tail: [], toolActs: new Map(), trail: [], live: '' };
+  const key = `${opts.sessionKey || chatId}:${botId}`;
 
   let fullText = text;
   if (chat.kind === 'group' && opts.origin === 'chat') {
@@ -141,7 +141,9 @@ function start(botId, chatId, text, opts) {
     fullText += `\n\nAttached files (read them with the Read tool):\n${opts.attachments.map((a) => `- ${a.path} (${a.name})`).join('\n')}`;
   }
 
-  const sid = chats.sessionFor(chatId, botId);
+  // Missions keep their own conversation, separate from your chat with the Bot.
+  const sessKey = opts.sessionKey || chatId;
+  const sid = chats.sessionFor(sessKey, botId);
   const newSid = sid ? null : crypto.randomUUID();
   const mcpFile = mcpConfig(runCtx);
   const args = [
@@ -157,7 +159,7 @@ function start(botId, chatId, text, opts) {
     '--add-dir', PATHS.uploads, '--add-dir', PATHS.shared,
     ...(sid ? ['--resume', sid] : ['--session-id', newSid]),
   ];
-  if (newSid) chats.setSession(chatId, botId, newSid);
+  if (newSid) chats.setSession(sessKey, botId, newSid);
 
   let resolveDone;
   runCtx.done = new Promise((r) => (resolveDone = r));
@@ -237,7 +239,7 @@ function start(botId, chatId, text, opts) {
       return;
     }
     if (evt.type === 'system' && evt.subtype === 'init' && evt.session_id) {
-      chats.setSession(chatId, botId, evt.session_id);
+      chats.setSession(sessKey, botId, evt.session_id);
     } else if (evt.type === 'assistant') {
       for (const block of evt.message?.content || []) {
         if (block.type === 'text' && block.text.trim()) {
@@ -313,7 +315,7 @@ function start(botId, chatId, text, opts) {
       error = stderr.trim().split('\n').slice(-3).join(' ') || `Claude Code exited with code ${code}`;
     }
     if (error && /No conversation found|session.*not found/i.test(error + stderr) && !opts._retried) {
-      sql('DELETE FROM chat_sessions WHERE chat_id = ? AND bot_id = ?', chatId, botId);
+      sql('DELETE FROM chat_sessions WHERE chat_id = ? AND bot_id = ?', sessKey, botId);
       runCtx.status = 'done'; emit('run', { ...publicRun(runCtx), ended: true });
       start(botId, chatId, text, { ...opts, _retried: true }).then(resolveDone);
       return;
@@ -391,7 +393,7 @@ export function stopChat(chatId) {
   for (const r of active.values()) if (r.chatId === chatId) stop(r.id);
 }
 
-const publicRun = (r) => ({ id: r.id, botId: r.botId, chatId: r.chatId, status: r.status, model: r.model, origin: r.origin, started: r.started,
+const publicRun = (r) => ({ id: r.id, botId: r.botId, chatId: r.chatId, missionId: r.missionId, status: r.status, model: r.model, origin: r.origin, started: r.started,
   steps: r.steps?.length || 0, browser: !!r.browser, live: (r.live || '').slice(-4000),
   trail: (r.trail || []).slice(-14).map(({ k, t, s, ms }) => ({ k, t, s, ms })), trailTotal: (r.trail || []).filter((x) => x.k === 'tool').length });
 export const activeRuns = () => [...active.values()].map(publicRun);

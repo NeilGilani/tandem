@@ -17,6 +17,8 @@ import * as memory from './memory.js';
 import * as vault from './vault.js';
 import { TEMPLATES } from './templates.js';
 import * as activity from './activity.js';
+import * as missions from './missions.js';
+import { spawn as spawnProc } from 'node:child_process';
 import { CATEGORIES } from './catalog.js';
 
 const PORT = Number(process.env.PORT || 4747);
@@ -24,6 +26,7 @@ const HOST = process.argv.includes('--lan') || process.env.TANDEM_LAN ? '0.0.0.0
 engine.setPort(PORT);
 tools.attach(engine);
 routines.attach(engine);
+missions.attach(engine);
 
 const WEB = path.join(ROOT, 'web');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json',
@@ -80,6 +83,7 @@ function stateSnapshot() {
     runs: engine.activeRuns(),
     computers: computer.statusAll(),
     pending: pendingCards(),
+    missions: missions.list().filter((m) => !['stopped'].includes(m.status) || Date.now() - m.updated < 864e5).slice(0, 40),
     connectors: connectors.installed().map(({ id, catalog_id, name, status, color, category, kind }) => ({ id, catalog_id, name, status, color, category, kind })),
     settings: publicSettings(),
   };
@@ -189,6 +193,8 @@ route('POST', '/api/chats/:id/messages', async (req, res, p) => {
     return m;
   }
   const msg = chats.addMessage({ chatId: p.id, author: 'user', text, parentId: body.parentId || null, attachments: body.attachments || [], meta: body.voice ? { voice: true } : {} });
+  const chatRow = chats.getChat(p.id);
+  if (chatRow?.kind === 'dm') missions.onUserMessage(p.id, chatRow.bot_ids[0]);
   engine.onUserMessage(p.id, msg).catch((e) => console.error('run', e));
   return msg;
 });
@@ -233,6 +239,20 @@ route('DELETE', '/api/routines/:id', (req, res, p) => { routines.remove(p.id); r
 route('POST', '/api/routines/:id/test', (req, res, p) => routines.start(p.id, { test: true }));
 route('POST', '/api/routines/:id/rotate', (req, res, p) => routines.rotateSecret(p.id));
 route('POST', '/api/schedule/preview', async (req) => routines.interpret((await readJson(req)).text));
+
+// Missions
+route('GET', '/api/missions', (req, res, p, q) => missions.list(q.get('bot') || undefined));
+route('GET', '/api/missions/:id', (req, res, p) => missions.getMission(p.id));
+route('POST', '/api/missions', async (req) => {
+  const b = await readJson(req);
+  return missions.create({ botId: b.botId, title: b.title, goal: b.goal, doneWhen: b.doneWhen || '', hours: b.hours || 'any', dailyBudget: b.dailyBudget || 12 });
+});
+route('PATCH', '/api/missions/:id', async (req, res, p) => missions.update(p.id, await readJson(req)));
+route('POST', '/api/missions/:id/pause', (req, res, p) => missions.pause(p.id));
+route('POST', '/api/missions/:id/resume', (req, res, p) => missions.resume(p.id));
+route('POST', '/api/missions/:id/stop', (req, res, p) => missions.stop(p.id));
+route('POST', '/api/missions/:id/now', (req, res, p) => { const m = missions.getMission(p.id); if (missions.isBusy(m.bot_id)) throw new Error('This Bot is busy right now'); missions.runSession(m); return { ok: true }; });
+route('DELETE', '/api/missions/:id', (req, res, p) => { missions.remove(p.id); return { ok: true }; });
 
 // Settings
 route('GET', '/api/settings', () => publicSettings());
@@ -422,6 +442,18 @@ server.keepAliveTimeout = 65000;
 // Computer ↔ Connect apps: re-check sign-ins every few minutes.
 setInterval(() => connectors.refresh().catch(() => {}), 3 * 60 * 1000);
 setInterval(() => activity.prune(), 6 * 3600 * 1000);
+// Missions: wake Bots on schedule, and resume what was due while Tandem was off.
+missions.recover();
+setInterval(() => missions.tick(), 15 * 1000);
+// Keep the Mac from idle-sleeping while Bots work or a mission wakes soon (the lid still sleeps it).
+let caffeinate = null;
+setInterval(() => {
+  const need = engine.activeRuns().length > 0 || missions.needsAwake();
+  if (need && !caffeinate && process.platform === 'darwin') {
+    caffeinate = spawnProc('caffeinate', ['-i', '-w', String(process.pid)], { stdio: 'ignore' });
+    caffeinate.on('exit', () => { caffeinate = null; });
+  } else if (!need && caffeinate) { caffeinate.kill(); caffeinate = null; }
+}, 20 * 1000);
 computer.startIdleReaper((botId) => engine.activeRuns().some((r) => r.botId === botId));
 // Routine scheduler.
 routines.recomputeAll();

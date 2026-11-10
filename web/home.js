@@ -4,6 +4,7 @@ import { api, h, avatar, icon, toast, menu, fileUrl } from './lib.js';
 import { S, bot, chat, dmOf, runsIn, go, comp } from './store.js';
 
 let askBot = null;
+let depsRef = null;
 let $root = null;
 let todayCache = { at: 0, items: [] };
 
@@ -23,7 +24,9 @@ function greeting() {
   return first ? `${part}, ${first}` : part;
 }
 
-export async function renderHome($main, { renderCard, planBars }) {
+export async function renderHome($main, deps) {
+  const { renderCard, planBars } = deps;
+  depsRef = deps;
   $root = $main;
   if (!askBot || !bot(askBot)) askBot = (S.bots.find((b) => b.is_primary) || S.bots[0])?.id;
   if (Date.now() - todayCache.at > 4000) {
@@ -117,6 +120,10 @@ function paint($main, renderCard, planBars) {
         plan ? h('button.plan-mini', { title: 'Claude plan usage', on: { click: () => go('#/settings/usage') } }, planBars(plan, { compact: true })) : null),
       ab ? h('div.ask', picker, h('div.ask-row', ta, h('button.round.dark', { title: 'Send', on: { click: send } }, icon('up')))) : null,
       section('Needs you', pending.length || null, pendingBlock),
+      section('Missions', (S.missions || []).filter((m) => ['active', 'waiting', 'blocked'].includes(m.status)).length || null,
+        (S.missions || []).filter((m) => ['active', 'waiting', 'blocked', 'paused'].includes(m.status)).length
+          ? h('div.mission-grid', (S.missions || []).filter((m) => ['active', 'waiting', 'blocked', 'paused'].includes(m.status)).slice(0, 6).map((m) => depsRef.missionCard(m, { compact: true })))
+          : h('button.calm', { style: { width: '100%', textAlign: 'left', cursor: 'pointer', background: 'none' }, on: { click: () => depsRef.newMission() } }, h('div.calm-ic', icon('plus')), h('div', h('b', 'Start a mission'), h('div.hint', 'Hand a Bot something big. It works on it for hours or days, on its own.')))),
       section('Working now', working.length || null, workingBlock),
       section('Your Bots', null, botsBlock),
       section('Today', null, todayBlock))));

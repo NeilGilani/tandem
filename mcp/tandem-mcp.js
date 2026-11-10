@@ -4,8 +4,8 @@
 import readline from 'node:readline';
 import http from 'node:http';
 
-const { TANDEM_URL, TANDEM_TOKEN, TANDEM_BOT, TANDEM_CHAT, TANDEM_RUN, TANDEM_ORIGIN, TANDEM_DEPTH, TANDEM_PREAPPROVED } = process.env;
-const ctx = { botId: TANDEM_BOT, chatId: TANDEM_CHAT, runId: TANDEM_RUN, origin: TANDEM_ORIGIN, depth: Number(TANDEM_DEPTH || 0), preapproved: TANDEM_PREAPPROVED === '1' };
+const { TANDEM_URL, TANDEM_TOKEN, TANDEM_BOT, TANDEM_CHAT, TANDEM_RUN, TANDEM_ORIGIN, TANDEM_DEPTH, TANDEM_PREAPPROVED, TANDEM_MISSION } = process.env;
+const ctx = { botId: TANDEM_BOT, chatId: TANDEM_CHAT, runId: TANDEM_RUN, origin: TANDEM_ORIGIN, depth: Number(TANDEM_DEPTH || 0), preapproved: TANDEM_PREAPPROVED === '1', missionId: TANDEM_MISSION || null };
 const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${TANDEM_TOKEN}` };
 
 const send = (msg) => process.stdout.write(JSON.stringify(msg) + '\n');

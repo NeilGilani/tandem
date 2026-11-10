@@ -15,6 +15,7 @@ import * as approvals from './approvals.js';
 import * as mac from './mac.js';
 import { CATALOG } from './catalog.js';
 import * as activity from './activity.js';
+import * as missions from './missions.js';
 
 let engine = null;
 export const attach = (e) => { engine = e; };
@@ -59,6 +60,13 @@ export const DEFS = [
     S({ question: str('The question'), options: { type: 'array', items: { type: 'string' }, description: 'Choices' }, fields: { type: 'array', items: { type: 'string' }, description: 'Form field labels' } }, ['question'])],
   ['add_to_library', 'Add a result (file in the workspace, page, image, video or link) to your Library.',
     S({ title: str('Title'), ref: str('Absolute file path or URL'), kind: { type: 'string', enum: ['page', 'image', 'video', 'file', 'link'] } }, ['title', 'ref'])],
+  ['start_mission', 'Start a long-running mission you own until it is done: for work that takes hours or days, many steps, or waiting on other people. Confirm the goal and done criteria with the user first unless they already gave them.',
+    S({ title: str('Short title'), goal: str('The outcome, in the user\'s terms'), done_when: str('Concrete, checkable criteria for done'), hours: str('"any" (default), "weekdays 9-18" or "daily 8-22"'), daily_sessions: num('Max work sessions per day (default 12)') }, ['title', 'goal'])],
+  ['set_mission_plan', 'Save your mission plan as a Markdown checklist ("- [ ] step", "- [x] done step"). Keep it current: check items off as you finish them, add new ones as you learn more.',
+    S({ plan: str('The full plan as a Markdown checklist') }, ['plan'])],
+  ['mission_checkpoint', 'End a mission work session. Record what you did and decide what happens next: continue right away, wait until a time, blocked on the user, or done.',
+    S({ note: str('What you did this session and where you left off (your future self reads this)'), next: { type: 'string', enum: ['continue', 'wait', 'blocked', 'done'] },
+      wait_until: str('ISO date-time to wake up, when next="wait"'), wait_reason: str('What you will do when you wake up'), blocked_reason: str('What you need from the user, when next="blocked"'), summary: str('Final summary of results, when next="done"') }, ['note', 'next'])],
   ['notify_user', 'Send the user a push notification (use sparingly).', S({ title: str(''), body: str('') }, ['body'])],
   // Mac apps (only usable when the matching app is connected)
   ['mac_calendar_events', 'Calendar (Mac): list upcoming events.', S({ days: num('Days ahead (default 7)'), calendar: str('Calendar name') })],
@@ -295,6 +303,12 @@ export async function call(tool, args = {}, ctx) {
       chats.addMessage({ chatId: ctx.chatId, author: 'bot', botId: ctx.botId, card: { type: 'file', status: 'done', kind, title: args.title, ref: args.ref } });
       return 'Added to your Library.';
     }
+    case 'start_mission': {
+      const m = missions.create({ botId: ctx.botId, title: args.title, goal: args.goal, doneWhen: args.done_when || '', hours: args.hours || 'any', dailyBudget: args.daily_sessions || 12 });
+      return { started: m.title, note: 'Your first work session starts in a moment, in its own conversation. Tell the user in one line that you are on it.' };
+    }
+    case 'set_mission_plan': return missions.setPlan(ctx.botId, args.plan);
+    case 'mission_checkpoint': return missions.checkpoint(ctx.botId, args);
     case 'notify_user':
       emit('notify', { botId: ctx.botId, chatId: ctx.chatId, title: args.title || bot.name, body: args.body });
       return 'Sent.';

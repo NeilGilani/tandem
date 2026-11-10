@@ -7,6 +7,7 @@ export const S = {
   showComputer: (() => { try { return localStorage.getItem('tandem.computer') === '1'; } catch { return false; } })(),
   route: routeFromHash(),
   pending: [],
+  missions: [],
   native: /[?&]app=mac\b/.test(location.search) || !!window.webkit?.messageHandlers?.tandem,
 };
 
@@ -86,6 +87,12 @@ export function connectEvents() {
   });
   es.addEventListener('computer', (e) => { const c = JSON.parse(e.data); if (c.botId) S.computers[c.botId] = c; fire('computer', c); });
   for (const t of ['routines', 'skills', 'library', 'teach.limit', 'activity']) es.addEventListener(t, (e) => fire(t, JSON.parse(e.data || '{}')));
+  es.addEventListener('mission', (e) => {
+    const m = JSON.parse(e.data);
+    S.missions = (S.missions || []).filter((x) => x.id !== m.id);
+    if (!m.deleted) S.missions.unshift(m);
+    fire('mission', m);
+  });
   es.addEventListener('usage', (e) => { S.settings.plan = JSON.parse(e.data); fire('usage'); });
   es.addEventListener('notify', (e) => fire('notify', JSON.parse(e.data)));
   es.onerror = () => { setTimeout(() => { if (es.readyState === 2) connectEvents(); }, 3000); };
