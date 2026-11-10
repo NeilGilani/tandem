@@ -243,6 +243,29 @@ export async function renderSettings($main, r) {
     content = [
       h('h2', 'Your computer'),
       h('div.field', h('label', 'Execution on this computer'), exec, h('div.hint', 'Whether Bots may run commands on this Mac. With risky commands only, everyday work like reading and writing files or running scripts goes ahead, and anything that deletes files, sends data out, installs software, reads saved passwords or touches system files stops for your OK.')),
+      h('h2', 'Bot laptops'),
+      (() => {
+        const L = st.laptops || {};
+        const mode = h('select.select', { style: { width: 'auto' } }, [['laptop', 'Each Bot gets its own Linux laptop'], ['mac', 'Bots use a browser on this Mac']].map(([v, l]) => h('option', { value: v, selected: st.computer_mode === v }, l)));
+        mode.addEventListener('change', () => patch({ computer_mode: mode.value }).then(() => toast('Saved. Restart Tandem to switch.')));
+        const word = { ready: 'Ready', starting: 'Starting', building: 'Setting up (one time, a few minutes)', missing: 'Needs Colima and Docker', error: 'Problem', unknown: 'Starts when a Bot needs it' }[L.status] || L.status;
+        const folders = [...(st.laptop_folders || [])];
+        const list = h('div.list', folders.map((f) => h('div.list-row', icon('file'), h('div.grow', h('code', f)),
+          h('button.btn.ghost.sm', { on: { click: () => patch({ laptop_folders: folders.filter((x) => x !== f) }).then(() => toast('Removed. Laptops restart when idle.')) } }, 'Remove'))));
+        const add = h('input.input', { placeholder: '/Users/you/Projects/your-company' });
+        return [
+          h('div.field', h('label', 'Computers'), mode, h('div.hint', 'A laptop has its own desktop, browser, terminal, files and office apps. All of them together use at most 5 GB of memory, and idle laptops sleep.')),
+          st.computer_mode === 'laptop' && h('dl.kv', h('dt', 'Status'), h('dd', word, L.detail ? ` · ${L.detail}` : '')),
+          st.computer_mode === 'laptop' && h('div.field', h('label', 'Mac folders the laptops can open'),
+            folders.length ? list : h('div.hint', 'None yet. Each Bot always has its own folder, the shared folder and your uploads.'),
+            h('div.hstack', { style: { marginTop: '8px' } }, add, h('button.btn', { on: { click: () => {
+              const f = add.value.trim();
+              if (!f.startsWith('/')) return toast('Use the full path, starting with /', 'bad');
+              patch({ laptop_folders: [...folders, f] }).then(() => toast('Added. Laptops restart when idle to pick it up.'));
+            } } }, 'Add folder')),
+            h('div.hint', 'They appear at the same path on every laptop, so Bots can read and write them like on your Mac.')),
+        ];
+      })(),
       h('h2', 'Bot computers'),
       h('p.hint', 'Each Bot has its own computer: its own browser with its own sign-ins, and its own files folder. A browser starts when its Bot starts work and goes to sleep after 15 minutes idle. Sign-ins are kept. Commands still run on this Mac.'),
       h('dl.kv', h('dt', 'Shared folder'), h('dd', h('code', st.shared || '')), h('dt', 'Bot folders'), h('dd', h('code', st.workspace || '')),

@@ -22,6 +22,7 @@ import * as toolbox from './toolbox.js';
 import * as squads from './squads.js';
 import * as laptop from './laptop.js';
 import * as accounts from './accounts.js';
+import * as company from './company.js';
 import * as missions from './missions.js';
 import { spawn as spawnProc } from 'node:child_process';
 import { CATEGORIES } from './catalog.js';
@@ -33,6 +34,7 @@ tools.attach(engine);
 routines.attach(engine);
 missions.attach(engine);
 squads.attach(engine);
+company.attach(engine);
 
 const WEB = path.join(ROOT, 'web');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json',
@@ -98,7 +100,7 @@ function stateSnapshot() {
 }
 
 // Everything waiting on you, across all chats (approvals, drafts, questions, sign-ins).
-const NEEDS_YOU = new Set(['approval', 'draft', 'question', 'secret', 'connect', 'takeover', 'skill_draft']);
+const NEEDS_YOU = new Set(['approval', 'draft', 'question', 'secret', 'connect', 'takeover', 'skill_draft', 'hire']);
 function pendingCards() {
   return all(`SELECT * FROM messages WHERE card IS NOT NULL AND card LIKE '%"status":"pending"%' ORDER BY created DESC LIMIT 100`)
     .map(chats.parseMsg).filter((m) => m.card && m.card.status === 'pending' && NEEDS_YOU.has(m.card.type));
@@ -116,6 +118,8 @@ function publicSettings() {
   return {
     auto_review: setting('auto_review') === '1',
     toolbox: toolbox.status().state,
+    draft_reviews: setting('draft_reviews') !== '0',
+    company_name: setting('company_name') || '',
     computer_mode: laptop.enabled() ? 'laptop' : 'mac',
     laptops: laptop.status(),
     laptop_folders: (() => { try { return JSON.parse(setting('laptop_folders') || '[]'); } catch { return []; } })(),
@@ -210,6 +214,13 @@ route('POST', '/api/chats/:id/messages', async (req, res, p) => {
   engine.onUserMessage(p.id, msg).catch((e) => console.error('run', e));
   return msg;
 });
+route('GET', '/api/company', () => ({ name: company.companyName(), org: company.org(), tasks: company.tasks(), reports: company.reportsFor(), timesheet: company.timesheet(),
+  shifts: missions.list().filter((m) => ['active', 'waiting', 'blocked'].includes(m.status)).map((m) => ({ botId: m.bot_id, hours: m.hours, title: m.title, status: m.status })),
+  worked: all("SELECT bot_id, created, ended FROM actions WHERE kind = 'run' AND created > ?", Date.now() - 864e5) }));
+route('PATCH', '/api/company', async (req) => { const b = await readJson(req); if (b.name !== undefined) setSetting('company_name', String(b.name).slice(0, 60)); if (b.draft_reviews !== undefined) setSetting('draft_reviews', b.draft_reviews ? '1' : '0'); emit('company'); return { ok: true }; });
+route('PATCH', '/api/company/bots/:id', async (req, res, p) => company.setRole(p.id, await readJson(req)));
+route('POST', '/api/company/tasks', async (req) => { const b = await readJson(req); return company.assign({ title: b.title, detail: b.detail, ownerId: b.ownerId, due: b.due, assignedBy: 'user' }); });
+route('PATCH', '/api/company/tasks/:id', async (req, res, p) => { const b = await readJson(req); return b.verdict ? company.review(p.id, { verdict: b.verdict, notes: b.notes, by: 'user' }) : company.update(p.id, { status: b.status, note: b.note, by: 'user' }); });
 route('GET', '/api/accounts', () => accounts.list().map((a) => ({ ...a, source: chats.getBot(a.source_bot)?.name || null })));
 route('PATCH', '/api/accounts/:key', async (req, res, p) => { const b = await readJson(req); accounts.setShared(decodeURIComponent(p.key), b.shared); return { ok: true }; });
 route('DELETE', '/api/accounts/:key', async (req, res, p) => { await accounts.forget(decodeURIComponent(p.key)); return { ok: true }; });
@@ -279,7 +290,13 @@ route('PATCH', '/api/settings', async (req) => {
   if (b.timezone) { setSetting('timezone', b.timezone); routines.recomputeAll(); }
   if (b.local_execution && ['smart', 'ask', 'always', 'never'].includes(b.local_execution)) setSetting('local_execution', b.local_execution);
   if (b.computer_mode && ['laptop', 'mac'].includes(b.computer_mode)) setSetting('computer_mode', b.computer_mode);
-  if (Array.isArray(b.laptop_folders)) setSetting('laptop_folders', JSON.stringify(b.laptop_folders.map(String).filter((f) => path.isAbsolute(f)).slice(0, 20)));
+  if (Array.isArray(b.laptop_folders)) {
+    setSetting('laptop_folders', JSON.stringify(b.laptop_folders.map(String).filter((f) => path.isAbsolute(f)).slice(0, 20)));
+    // Laptops pick up new folders on their next start; running ones restart when idle.
+    laptop.foldersChanged();
+    for (const bt of chats.listBots()) if (!engine.activeRuns().some((r) => r.botId === bt.id)) laptop.remove(bt.id);
+    laptop.prepare();
+  }
   if (b.theme) setSetting('theme', b.theme);
   if (b.user_name != null) setSetting('user_name', String(b.user_name).trim().slice(0, 60));
   if (b.usage_guard != null) setSetting('usage_guard', b.usage_guard ? '1' : '0');
@@ -467,6 +484,7 @@ setInterval(() => activity.prune(), 6 * 3600 * 1000);
 missions.recover();
 toolbox.ensure(); // shared Python for Bots, built once in the background
 squads.recover();
+setInterval(() => company.tickDraftReviews(), 5 * 60e3);
 // Company sign-ins: every Bot's computer gets them when it wakes; keep them fresh.
 accounts.onRefresh((botId) => connectors.refresh(botId));
 computer.onBrowserStart((botId) => accounts.applyAll(botId));

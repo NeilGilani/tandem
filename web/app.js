@@ -11,6 +11,7 @@ import { cheer } from './alive.js';
 import { openQuickAsk } from './quickask.js';
 import { renderMissions, newMission, missionCard, openMission, progress as missionProgress } from './missions.js';
 import { renderInbox } from './inbox.js';
+import { renderCompany } from './company.js';
 
 const $sidebar = document.getElementById('sidebar');
 const $main = document.getElementById('main');
@@ -180,6 +181,8 @@ function renderSidebar() {
       h(`button.nav-row${S.route.name === 'home' ? '.active' : ''}`, { on: { click: () => go('#/home') } }, icon('home'), h('span', 'Home')),
       h(`button.nav-row${S.route.name === 'inbox' ? '.active' : ''}`, { on: { click: () => go('#/inbox') } }, icon('inbox'), h('span', 'Needs you'),
         S.pending.length ? h('span.badge', String(S.pending.length)) : null),
+      h(`button.nav-row${S.route.name === 'company' ? '.active' : ''}`, { on: { click: () => go('#/company') } }, icon('users'), h('span', S.settings.company_name || 'Company'),
+        S.runs.filter((r) => !r.squadId).length ? h('span.count-soft', `${S.runs.filter((r) => !r.squadId).length} working`) : null),
       h(`button.nav-row${S.route.name === 'missions' ? '.active' : ''}`, { on: { click: () => go('#/missions') } }, icon('target'), h('span', 'Missions'),
         (S.missions || []).filter((m) => m.status === 'blocked').length ? h('span.badge', String(S.missions.filter((m) => m.status === 'blocked').length))
           : (S.missions || []).filter((m) => ['active', 'waiting'].includes(m.status)).length ? h('span.count-soft', String(S.missions.filter((m) => ['active', 'waiting'].includes(m.status)).length)) : null),
@@ -738,17 +741,30 @@ function renderCard(m) {
     inputs.body = h('textarea.textarea.draft-body', { value: c.body || '', rows: 8, disabled: !pending });
     const edits = () => Object.fromEntries(Object.entries(inputs).map(([k, el]) => [k, el.value]));
     if (!pending) {
-      return h('div.card', h('div.card-h', `${c.app} draft`, statusPill(c.status)),
-        h('div.card-b', h('div.card-title', c.subject || c.to), h('div', { style: { whiteSpace: 'pre-wrap' } }, (c.body || '').slice(0, 280) + ((c.body || '').length > 280 ? '…' : ''))));
+      const label = c.status === 'review' ? h('span.pill', `With ${c.reviewer || 'its boss'} for review`) : c.status === 'returned' ? h('span.pill.bad', `Sent back by ${c.reviewedBy || 'its boss'}`) : statusPill(c.status);
+      return h('div.card', h('div.card-h', `${c.app || 'Email'} draft`, label),
+        h('div.card-b', h('div.card-title', c.subject || c.to), h('div', { style: { whiteSpace: 'pre-wrap' } }, (c.body || '').slice(0, 280) + ((c.body || '').length > 280 ? '…' : '')),
+          c.status === 'returned' && c.reviewNote && h('div.review-note', h('b', `${c.reviewedBy}: `), c.reviewNote)));
     }
     return h('div.card.wide',
-      h('div.card-h', `${c.app} draft`, h('span.pill.warn', 'Needs approval')),
+      h('div.card-h', `${c.app || 'Email'} draft`, c.reviewedBy ? h('span.pill.good', `Reviewed by ${c.reviewedBy}`) : h('span.pill.warn', 'Needs approval')),
+      (c.reviewedBy && c.reviewNote) || (c.reviewNote && !c.reviewedBy) ? h('div.review-note', h('b', c.reviewedBy ? `${c.reviewedBy}: ` : ''), c.reviewNote) : null,
       h('div.card-b', field('to', 'To'), (c.cc) && field('cc', 'Cc'), !isChat && field('subject', 'Subject'), inputs.body,
         c.thread && h('div.hint', `In reply to: ${c.thread}`)),
       h('div.card-actions',
         h('button.btn.primary', { on: { click: () => cardAction(m, { action: 'send', edits: edits() }) } }, isChat ? 'Send message' : 'Send'),
         h('button.btn', { on: { click: () => cardAction(m, { action: 'discard' }) } }, 'Discard'),
         h('button.btn.ghost', { style: { marginLeft: 'auto' }, on: { click: () => api('PATCH', `/api/bots/${m.bot_id}`, { drafts: 0 }).then(() => toast(`${b?.name} will send directly from now on`)) } }, 'Turn off drafts')));
+  }
+
+  if (c.type === 'hire') {
+    const boss = bot(c.boss);
+    if (!pending) return h('div.approval-done', h('span', c.status === 'hired' ? `You hired a ${c.role}${c.hired && bot(c.hired) ? `: ${bot(c.hired).name}` : ''}` : `You declined hiring a ${c.role}`));
+    const nameIn = h('input.input', { value: c.name || '', placeholder: c.role });
+    return h('div.card.wide', h('div.card-h', 'Hiring request', h('span.pill.warn', 'Needs you')),
+      h('div.card-b', h('div.card-title', `${boss?.name || 'A Bot'} wants to hire a ${c.role}`), h('div.md', { html: md(c.why || '') }),
+        h('div.draft-field', h('label', 'Name'), nameIn), h('div.hint', `They'd report to ${boss?.name || 'its boss'} and get their own ${S.settings.computer_mode === 'laptop' ? 'laptop' : 'computer'}.`)),
+      h('div.card-actions', h('button.btn.primary', { on: { click: () => cardAction(m, { name: nameIn.value.trim() }) } }, 'Hire'), h('button.btn', { on: { click: () => cardAction(m, { decline: true }) } }, 'Not now')));
   }
 
   if (c.type === 'question') {
@@ -1019,6 +1035,7 @@ export function openPalette() {
     { label: 'Connect apps', sub: '⌘⇧M', run: () => go('#/apps') },
     { label: 'Home', run: () => go('#/home') },
     { label: 'Needs you', run: () => go('#/inbox') },
+    { label: 'Company', run: () => go('#/company') },
     { label: 'Missions', run: () => go('#/missions') },
     { label: 'Start a mission', run: () => newMission() },
     { label: 'Skills', run: () => go('#/skills') },
@@ -1092,6 +1109,7 @@ function render() {
     else if (r.name === 'templates') renderTemplates($main, r);
     else if (r.name === 'activity') renderActivity($main, r);
     else if (r.name === 'missions') renderMissions($main);
+    else if (r.name === 'company') renderCompany($main);
     else if (r.name === 'inbox') renderInbox($main, { renderCard });
     else renderHome();
   }

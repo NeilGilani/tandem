@@ -39,10 +39,20 @@ export function prepare() {
   preparing = (async () => {
     try {
       if (!fs.existsSync(BIN('colima')) || !fs.existsSync(BIN('docker'))) { setState('missing', 'Install Colima and Docker: brew install colima docker'); return false; }
-      try { await text(['info', '--format', '{{.ServerVersion}}'], { timeout: 8000 }); }
-      catch {
+      // The VM shares Tandem's data folder plus the Mac folders you chose for the laptops.
+      const want = vmFolders();
+      const missing = want.filter((f) => !mountedFolders().includes(f));
+      let up = true;
+      try { await text(['info', '--format', '{{.ServerVersion}}'], { timeout: 8000 }); } catch { up = false; }
+      if (up && missing.length && fs.existsSync(configFile())) {
+        setState('starting', 'Sharing your folders with the laptops');
+        await sh(BIN('colima'), ['stop', PROFILE], { timeout: 180000 }).catch(() => {});
+        up = false;
+      }
+      if (!up) {
         setState('starting', 'Starting the laptops VM');
-        await sh(BIN('colima'), ['start', PROFILE, '--vm-type', 'vz', '--mount-type', 'virtiofs', '--cpu', '4', '--memory', '5', '--disk', '40', '--mount', `${PATHS.data}:w`, '--runtime', 'docker'], { timeout: 600000 });
+        await sh(BIN('colima'), ['start', PROFILE, '--vm-type', 'vz', '--mount-type', 'virtiofs', '--cpu', '4', '--memory', '5', '--disk', '40',
+          ...want.flatMap((f) => ['--mount', `${f}:w`]), '--runtime', 'docker'], { timeout: 600000 });
       }
       const has = await text(['images', '-q', IMAGE]).catch(() => '');
       if (!has) {
@@ -61,12 +71,21 @@ export function prepare() {
 
 // Laptops are on unless you chose the Mac browser, or Colima and Docker aren't installed.
 const installed = () => ['colima', 'docker'].every((n) => ['/opt/homebrew/bin', '/usr/local/bin'].some((d) => fs.existsSync(path.join(d, n))));
+const configFile = () => path.join(os.homedir(), '.colima', PROFILE, 'colima.yaml');
+// Folders the VM shares now (from its config), and the ones it should share.
+function mountedFolders() {
+  try { return [...fs.readFileSync(configFile(), 'utf8').matchAll(/^\s*-\s*location:\s*(.+)$/gm)].map((m) => m[1].trim().replace(/^["']|["']$/g, '')); } catch { return []; }
+}
+const extraFolders = () => { try { return JSON.parse(setting('laptop_folders') || '[]').filter((f) => path.isAbsolute(f) && fs.existsSync(f)); } catch { return []; } };
+const vmFolders = () => [...new Set([PATHS.data, ...extraFolders()])];
+// A folder change takes effect the next time laptops are prepared (the VM restarts once).
+export function foldersChanged() { if (state.status === 'ready') state = { status: 'unknown', detail: '' }; }
+
 export const enabled = () => { const m = setting('computer_mode'); return m === 'laptop' || (m !== 'mac' && installed()); };
 
 // Mac folders every laptop can open, at the same path as on the Mac.
 function folders(workspace) {
-  const extra = (() => { try { return JSON.parse(setting('laptop_folders') || '[]'); } catch { return []; } })();
-  return [...new Set([workspace, PATHS.shared, PATHS.uploads, ...extra])].filter((f) => fs.existsSync(f));
+  return [...new Set([workspace, PATHS.shared, PATHS.uploads, ...extraFolders()])].filter((f) => fs.existsSync(f));
 }
 
 // Start (or wake) a Bot's laptop. ports: { cdp, screen }.

@@ -19,6 +19,7 @@ import * as missions from './missions.js';
 import * as squads from './squads.js';
 import * as laptop from './laptop.js';
 import * as accounts from './accounts.js';
+import * as company from './company.js';
 
 let engine = null;
 export const attach = (e) => { engine = e; };
@@ -70,6 +71,18 @@ export const DEFS = [
   ['mission_checkpoint', 'End a mission work session. Record what you did and decide what happens next: continue right away, wait until a time, blocked on the user, or done.',
     S({ note: str('What you did this session and where you left off (your future self reads this)'), next: { type: 'string', enum: ['continue', 'wait', 'blocked', 'done'] },
       wait_until: str('ISO date-time to wake up, when next="wait"'), wait_reason: str('What you will do when you wake up'), blocked_reason: str('What you need from the user, when next="blocked"'), summary: str('Final summary of results, when next="done"') }, ['note', 'next'])],
+  ['assign_task', 'Give one of your direct reports an assignment (you are their boss). They are woken to work on it and submit it back to you for review.',
+    S({ to: str('Bot name'), title: str('Short title of the assignment'), detail: str('Exactly what to do and what to hand back'), due: str('Due date, e.g. 2026-11-14 (optional)') }, ['to', 'title'])],
+  ['list_tasks', 'List your open assignments, and the ones waiting for your review.', S({})],
+  ['update_task', 'Record progress on one of your assignments: status (todo, doing, blocked) and a short note.', S({ id: str('Assignment id'), status: { type: 'string', enum: ['todo', 'doing', 'blocked'] }, note: str('') }, ['id'])],
+  ['submit_task', 'Hand in a finished assignment with the result (what you did, where the files are). It goes to your boss for review.', S({ id: str('Assignment id'), result: str('The result and file paths') }, ['id', 'result'])],
+  ['review_task', "Review an assignment one of your reports submitted: approve it, or send it back with clear notes on what to fix.", S({ id: str('Assignment id'), verdict: { type: 'string', enum: ['approve', 'send_back'] }, notes: str('') }, ['id', 'verdict'])],
+  ['review_draft', "Review a draft message one of your reports wrote before it reaches Neil: approve (optionally fixing subject or body) or send back with notes.",
+    S({ card_id: str('The draft card id from the review request'), verdict: { type: 'string', enum: ['approve', 'send_back'] }, notes: str('What you changed, or what they should fix'), subject: str('Fixed subject (optional)'), body: str('Fixed body (optional)') }, ['card_id', 'verdict'])],
+  ['post_report', 'Post your standup (start of your shift: yesterday, today, blockers) or end-of-day report (shipped, open, blocked). Your boss and Neil see it on the Company page.',
+    S({ kind: { type: 'string', enum: ['standup', 'eod'] }, text: str('Three or four short lines') }, ['kind', 'text'])],
+  ['request_hire', 'Ask Neil to hire a new Bot onto your team, when there is more steady work in your area than you and your reports can do. Neil approves or declines.',
+    S({ title: str('Job title, e.g. Prospecting rep'), why: str('The work they would own and why now'), name: str('Suggested name (optional)') }, ['title', 'why'])],
   ['desktop_screenshot', "See your laptop's whole screen (1280 by 800): the desktop, every open window and app, not just the browser page. Use it before clicking on the desktop.", S({})],
   ['desktop', "Use your laptop's desktop with the mouse and keyboard, for desktop apps (LibreOffice spreadsheets, documents and slides, the file manager, the terminal window). For websites, use the browser tools instead. Returns a fresh screenshot. action: click, double_click, move, drag (to x2,y2), scroll (amount, negative is up), type (text), key (keys like ctrl+s or Return), open (app: browser, terminal, files, spreadsheet, document, slides, editor, optionally a file path).",
     S({ action: { type: 'string', enum: ['click', 'double_click', 'move', 'drag', 'scroll', 'type', 'key', 'open'] }, x: num('Screen x'), y: num('Screen y'), x2: num(''), y2: num(''), amount: num(''), text: str(''), keys: str('xdotool key names, space separated'), app: str(''), file: str('Absolute path to open with the app'), button: str('left or right') }, ['action'])],
@@ -121,7 +134,7 @@ function waitCard(msgId, ctx) {
 function postCard(ctx, card, text = '') {
   const chatId = card.type === 'question' ? ctx.chatId : cardChat(ctx);
   const msg = chats.addMessage({ chatId, author: 'bot', botId: ctx.botId, text, card: { status: 'pending', ...card } });
-  emit('notify', { botId: ctx.botId, chatId, title: chats.getBot(ctx.botId)?.name, body: card.title || card.question || card.reason || 'Needs you' });
+  if (card.status !== 'review') emit('notify', { botId: ctx.botId, chatId, title: chats.getBot(ctx.botId)?.name, body: card.title || card.question || card.reason || 'Needs you' });
   return msg;
 }
 
@@ -137,6 +150,16 @@ export function resolveCard(msgId, payload) {
     if (w) { waiters.delete(msgId); w(value); }
   };
   switch (card.type) {
+    case 'hire': {
+      if (payload.decline) { done('declined', {}); engine.runInDm(card.boss, `[Neil declined hiring a ${card.role}]${payload.note ? ` ${payload.note}` : ''}`, { origin: 'handoff' }).catch(() => {}); return true; }
+      const nb = chats.createBot({ name: (payload.name || card.name || card.role).trim(), label: card.role });
+      company.setRole(nb.id, { title: card.role, bossId: card.boss });
+      memory.remember(nb.id, `My job (hired ${new Date().toISOString().slice(0, 10)}): ${card.role}, reporting to ${chats.getBot(card.boss)?.name}. ${card.why}`);
+      card.hired = nb.id;
+      done('hired', { botId: nb.id });
+      engine.runInDm(card.boss, `[Neil approved the hire] ${nb.name} (${card.role}) now reports to you. Give them their first assignment with assign_task.`, { origin: 'handoff' }).catch(() => {});
+      return true;
+    }
     case 'question':
       card.answer = payload.answer;
       return done('answered', { answer: payload.answer });
@@ -253,6 +276,31 @@ export async function call(tool, args = {}, ctx) {
 
   switch (tool) {
     case 'site_fetch': return siteFetch(args, ctx);
+    case 'assign_task': return company.assign({ title: args.title, detail: args.detail, ownerId: args.to, assignedBy: ctx.botId, due: args.due });
+    case 'list_tasks': return { mine: company.tasks({ ownerId: ctx.botId, open: true }).map(({ id, title, status, due, notes }) => ({ id, title, status, due, lastNote: notes?.at(-1)?.text })),
+      toReview: company.tasks({ open: true }).filter((t) => t.reviewer_id === ctx.botId && t.status === 'review').map(({ id, title, owner_id, result }) => ({ id, title, from: chats.getBot(owner_id)?.name, result })) };
+    case 'update_task': { const t = company.getTask(args.id); if (!t || t.owner_id !== ctx.botId) throw new Error('That assignment is not yours.'); company.update(args.id, { status: args.status, note: args.note, by: ctx.botId }); return 'Updated.'; }
+    case 'submit_task': { const t = company.getTask(args.id); if (!t || t.owner_id !== ctx.botId) throw new Error('That assignment is not yours.'); return company.submit(args.id, { result: args.result, by: ctx.botId }); }
+    case 'review_task': return company.review(args.id, { verdict: args.verdict, notes: args.notes, by: ctx.botId });
+    case 'review_draft': {
+      const m = chats.getMessage(args.card_id);
+      if (!m?.card || m.card.type !== 'draft' || m.card.status !== 'review') return 'That draft is not waiting for review.';
+      if (company.bossOf(m.bot_id)?.id !== ctx.botId) return 'Only the writer\'s boss reviews this draft.';
+      const me = chats.getBot(ctx.botId).name;
+      if (args.verdict === 'approve') {
+        chats.updateMessage(m.id, { card: { ...m.card, status: 'pending', ...(args.subject ? { subject: args.subject } : {}), ...(args.body ? { body: args.body } : {}), reviewedBy: me, reviewNote: args.notes || null } });
+        emit('notify', { botId: m.bot_id, chatId: m.chat_id, title: 'Draft ready for you', body: `${chats.getBot(m.bot_id)?.name}'s draft to ${m.card.to}, reviewed by ${me}` });
+        return 'Approved. It is in Neil\'s inbox now.';
+      }
+      chats.updateMessage(m.id, { card: { ...m.card, status: 'returned', reviewedBy: me, reviewNote: args.notes || '' } });
+      engine.runInDm(m.bot_id, `[${me} sent your draft back] To: ${m.card.to}${m.card.subject ? `, "${m.card.subject}"` : ''}\nNotes: ${args.notes || '(none)'}\nFix it and draft again if it's still needed.`, { origin: 'handoff' }).catch(() => {});
+      return 'Sent back with your notes.';
+    }
+    case 'post_report': company.postReport(ctx.botId, args.kind === 'eod' ? 'eod' : 'standup', args.text); return 'Posted.';
+    case 'request_hire': {
+      const msg = postCard(ctx, { type: 'hire', title: `Hire a ${args.title}`, role: args.title, why: args.why, name: args.name || '', boss: ctx.botId });
+      return `Asked Neil to approve hiring a ${args.title}. You'll hear back here.`;
+    }
     case 'desktop_screenshot':
     case 'desktop': {
       if (!computer.onLaptop(ctx.botId)) return 'Desktop tools need a laptop. This Bot is using a browser on the Mac; use the browser tools.';
@@ -281,8 +329,11 @@ export async function call(tool, args = {}, ctx) {
     case 'recall': return memory.recall(ctx.botId);
     case 'log_work': memory.logWork(ctx.botId, args.text); return 'Logged.';
     case 'list_bots': return chats.listBots().filter((b) => b.id !== ctx.botId).map((b) => ({ name: b.name, label: b.label }));
-    case 'message_bot':
-      return engine.handoff({ fromBot: ctx.botId, fromChat: ctx.chatId, to: args.to, text: args.text, expectReply: args.expect_reply !== false, depth: Number(ctx.depth || 0) });
+    case 'message_bot': {
+      const text = [args.text, args.message, args.body, args.content].find((x) => typeof x === 'string' && x.trim());
+      if (!text) throw new Error('Put the message in "text".');
+      return engine.handoff({ fromBot: ctx.botId, fromChat: ctx.chatId, to: args.to || args.bot || args.name, text, expectReply: args.expect_reply !== false, depth: Number(ctx.depth || 0) });
+    }
     case 'list_skills': return skills.enabledFor(ctx.botId).map((s) => ({ name: s.name, description: s.description }));
     case 'get_skill': {
       const s = skills.read(args.name);
@@ -346,10 +397,17 @@ export async function call(tool, args = {}, ctx) {
       return res.saved ? `Saved "${res.saved}" in the Vault. Use vault_fill_login on the sign-in page.` : res.expired ? 'The request expired.' : 'The user declined.';
     }
     case 'draft_message': {
-      const dm = postCard(ctx, { type: 'draft', app: args.app, to: args.to, cc: args.cc || '', subject: args.subject || '', body: args.body, thread: args.thread || '', title: `${args.app} draft` });
+      args.app = args.app || (/@/.test(args.to || '') ? 'Email' : 'Message');
+      if (!String(args.body || '').trim()) throw new Error('Put the full message in "body".');
+      // A Bot with a boss: the draft goes to the boss for review before it reaches you.
+      const review = company.needsDraftReview(ctx.botId);
+      const boss = review ? company.bossOf(ctx.botId) : null;
+      const dm = postCard(ctx, { type: 'draft', app: args.app, to: args.to, cc: args.cc || '', subject: args.subject || '', body: args.body, thread: args.thread || '', title: `${args.app} draft`,
+        ...(review ? { status: 'review', reviewer: boss.name, reviewSince: now() } : {}) });
+      if (review) company.requestDraftReview(dm, ctx.botId);
       const actId = activity.log({ runId: ctx.runId, botId: ctx.botId, chatId: dm.chat_id, kind: 'draft', tool: 'draft_message', summary: `${args.app} draft to ${args.to}${args.subject ? `: ${args.subject}` : ''}`, detail: args.body, status: 'pending', origin: ctx.origin });
       chats.updateMessage(dm.id, { meta: { ...(dm.meta || {}), actId } });
-      return 'The draft is shown to the user with Send and Discard. Do not send it yourself. If they press Send, you will be asked to send it.';
+      return review ? `The draft went to ${boss.name} for review; after that Neil sees it with Send and Discard. Do not send it yourself.` : 'The draft is shown to the user with Send and Discard. Do not send it yourself. If they press Send, you will be asked to send it.';
     }
     case 'ask_user': {
       const msg = postCard(ctx, { type: 'question', question: args.question, options: args.options || [], fields: args.fields || [] });

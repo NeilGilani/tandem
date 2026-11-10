@@ -10,6 +10,7 @@ import { db, all, get, run, uid, now, timezone } from './db.js';
 import { emit } from './bus.js';
 import * as chats from './chats.js';
 import * as activity from './activity.js';
+import * as company from './company.js';
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS missions (
@@ -150,6 +151,16 @@ function inHours(m) {
   return { ok: false, retry: t + 30e3 };
 }
 
+// Shift rituals: a standup to open the day, an end-of-day report to close it.
+function shiftNote(m) {
+  const out = [];
+  if (!company.hadStandup(m.bot_id)) out.push('Start of your shift: before anything else, post_report a standup (yesterday, today, blockers).');
+  const mm = String(m.hours || '').match(/(\d{1,2})-(\d{1,2})/);
+  const hour = Number(new Date().toLocaleString('en-US', { timeZone: timezone(), hour: 'numeric', hourCycle: 'h23' }));
+  if (mm && hour >= Number(mm[2]) - 1 && !company.hadEod(m.bot_id)) out.push('Your shift ends within the hour: finish with an end-of-day post_report (shipped, open, blocked) before your checkpoint.');
+  return out.length ? out.join('\n') + '\n\n' : '';
+}
+
 function brief(m, { fresh }) {
   const p = progress(m.plan || '');
   const recent = m.notes.slice(-6).map((n) => `- ${new Date(n.at).toLocaleString('en-US', { timeZone: timezone(), dateStyle: 'medium', timeStyle: 'short' })}: ${n.text}`).join('\n') || '- (none yet)';
@@ -164,7 +175,7 @@ ${m.plan || '(no plan yet: write one with set_mission_plan as a Markdown checkli
 Recent notes:
 ${recent}
 
-Work on the next unchecked items for as long as it's useful in this session. Keep the plan current with set_mission_plan
+${shiftNote(m)}Work on the next unchecked items for as long as it's useful in this session. Keep the plan current with set_mission_plan
 (check items off as you finish them). Then call mission_checkpoint exactly once with what you did and what's next:
 next="continue" to keep going right away, next="wait" with wait_until (ISO time) when you're waiting on the world
 (replies, a deadline, office hours), next="blocked" when you need the user, or next="done" with a summary when the

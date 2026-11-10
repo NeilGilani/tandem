@@ -17,7 +17,7 @@ function routeFromHash() {
   return name ? { name, id, sub } : { name: 'home' };
 }
 
-const NEEDS_YOU = new Set(['approval', 'draft', 'question', 'secret', 'connect', 'takeover', 'skill_draft']);
+const NEEDS_YOU = new Set(['approval', 'draft', 'question', 'secret', 'connect', 'takeover', 'skill_draft', 'hire']);
 const listeners = new Map();
 export function on(evt, fn) { (listeners.get(evt) || listeners.set(evt, new Set()).get(evt)).add(fn); }
 export function fire(evt, data) { for (const fn of listeners.get(evt) || []) fn(data); }
@@ -99,7 +99,7 @@ export function connectEvents() {
     fire('run', r);
   });
   es.addEventListener('computer', (e) => { const c = JSON.parse(e.data); if (c.botId) S.computers[c.botId] = c; fire('computer', c); });
-  for (const t of ['routines', 'skills', 'library', 'teach.limit', 'activity']) es.addEventListener(t, (e) => fire(t, JSON.parse(e.data || '{}')));
+  for (const t of ['routines', 'skills', 'library', 'teach.limit', 'activity', 'company']) es.addEventListener(t, (e) => fire(t, JSON.parse(e.data || '{}')));
   es.addEventListener('mission', (e) => {
     const m = JSON.parse(e.data);
     S.missions = (S.missions || []).filter((x) => x.id !== m.id);

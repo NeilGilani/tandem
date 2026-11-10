@@ -12,6 +12,7 @@ const KIND = {
   connect: { ic: 'plug', label: 'Connect' },
   takeover: { ic: 'hand', label: 'Take over' },
   skill_draft: { ic: 'book', label: 'Skill' },
+  hire: { ic: 'users', label: 'Hire' },
 };
 const ago = (ts) => {
   const s = (Date.now() - ts) / 1000;
@@ -31,13 +32,14 @@ export function titleOf(m) {
     case 'connect': return `Connect ${c.name}`;
     case 'takeover': return c.reason;
     case 'skill_draft': return c.title;
+    case 'hire': return c.title;
     default: return 'Needs you';
   }
 }
 function subOf(m) {
   const c = m.card, b = bot(m.bot_id);
   const bits = [b?.name || 'Bot'];
-  if (c.type === 'draft') bits.push(`${c.app} to ${c.to}`);
+  if (c.type === 'draft') bits.push(`${c.app || 'Email'} to ${c.to}${c.reviewedBy ? `, reviewed by ${c.reviewedBy}` : ''}`);
   else if (c.type === 'approval' && c.site) bits.push(c.site);
   else bits.push(KIND[c.type]?.label);
   return bits.filter(Boolean).join(' · ');
