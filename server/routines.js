@@ -133,6 +133,11 @@ export function rotateSecret(id) {
 
 // Scheduler tick.
 let guardNotified = 0;
+// A run still marked Running at startup was cut off when Tandem last quit.
+export function recover() {
+  run("UPDATE runs SET status = 'Interrupted', reason = 'Tandem restarted during the run', ended = ? WHERE status = 'Running'", now());
+}
+
 export function tick() {
   const due = all("SELECT * FROM routines WHERE trigger = 'schedule' AND paused = 0 AND next_run IS NOT NULL AND next_run <= ?", now());
   if (!due.length) return;

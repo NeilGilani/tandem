@@ -457,6 +457,7 @@ setInterval(() => activity.prune(), 6 * 3600 * 1000);
 missions.recover();
 toolbox.ensure(); // shared Python for Bots, built once in the background
 squads.recover();
+routines.recover();
 setInterval(() => missions.tick(), 15 * 1000);
 // Keep the Mac from idle-sleeping while Bots work or a mission wakes soon (the lid still sleeps it).
 let caffeinate = null;
