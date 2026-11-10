@@ -199,6 +199,10 @@ section { padding: 110px 0 0; }
 .tiles { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; padding: 22px; border-radius: 22px; background: #14171e; box-shadow: 0 0 0 1px #20242d inset; }
 .tile { aspect-ratio: 1; border-radius: 14px; background: #1a1e26; display: grid; place-items: center; font: 700 16px var(--head); color: rgba(255,255,255,.25); transition: all .35s; box-shadow: 0 0 0 1px #232833 inset; }
 .tile.lit { background: var(--c); color: #fff; box-shadow: 0 0 0 1px rgba(255,255,255,.25) inset, 0 10px 30px -6px var(--c); transform: translateY(-2px); }
+.tile.logo img { width: 46%; height: 46%; object-fit: contain; filter: grayscale(1) brightness(1.6); opacity: .28; transition: all .35s; }
+.tile.logo.lit { background: #fff; box-shadow: 0 0 0 1px rgba(255,255,255,.4) inset, 0 12px 34px -8px rgba(140,170,255,.55); }
+.tile.logo.lit img { filter: none; opacity: 1; }
+.tile.lit:not(.logo) { background: #3a4252; color: #fff; }
 .tile.core { background: linear-gradient(160deg, #a9c6f6, #6c90e4); box-shadow: 0 0 44px -6px rgba(110,150,240,.85); }
 
 /* Install */
@@ -284,6 +288,119 @@ footer { padding: 64px 0 40px; }
   .foot > :first-child { grid-column: span 2; }
   section { padding-top: 84px; }
 }
+
+/* ---------- v0.5 ---------- */
+.new-pill { position: relative; display: inline-flex; align-items: center; gap: 8px; margin: 0 auto 22px; padding: 6px 8px 6px 14px; border-radius: 999px; background: rgba(255,255,255,.72); box-shadow: 0 0 0 1px rgba(255,255,255,.8) inset, 0 8px 24px -12px rgba(20,40,100,.35); font-size: 13.5px; color: #1d2a44; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); transition: transform .2s; }
+.new-pill:hover { transform: translateY(-1px); }
+.new-pill b { font-weight: 600; }
+.new-pill i { font-style: normal; display: inline-flex; align-items: center; gap: 4px; background: var(--ink); color: #fff; border-radius: 999px; padding: 3px 10px; font-size: 12px; font-weight: 600; }
+/* Logo marquee */
+.marquee { padding: 46px 0 8px; text-align: center; overflow: hidden; }
+.mq-t { font-size: 14px; color: var(--ink-3); margin-bottom: 22px; }
+.mq { position: relative; display: grid; gap: 14px; -webkit-mask: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent); mask: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent); }
+.mq-row { display: flex; gap: 14px; width: max-content; animation: mq 60s linear infinite; }
+.mq-row.rev { animation-direction: reverse; animation-duration: 70s; }
+.mq:hover .mq-row { animation-play-state: paused; }
+@keyframes mq { to { transform: translateX(-50%); } }
+.mq-logo { width: 58px; height: 58px; border-radius: 16px; background: #fff; display: grid; place-items: center; box-shadow: 0 0 0 1px var(--line) inset, 0 6px 16px -10px rgba(20,30,60,.25); flex: none; }
+.mq-logo img { width: 30px; height: 30px; object-fit: contain; }
+@media (prefers-reduced-motion: reduce) { .mq-row { animation: none; } }
+/* Squads */
+.sq-sec { display: grid; grid-template-columns: 1fr 1.25fr; gap: 56px; align-items: center; }
+.kicker { display: inline-flex; font-size: 13px; font-weight: 600; color: #2f5fc4; background: #e8eefc; padding: 4px 11px; border-radius: 999px; margin-bottom: 16px; }
+.sq-pts { margin-top: 28px; display: grid; gap: 18px; }
+.sq-pts div { display: grid; grid-template-columns: 34px 1fr; gap: 14px; align-items: start; }
+.sq-pts .ic { width: 34px; height: 34px; border-radius: 10px; background: #fff; box-shadow: inset 0 0 0 1px var(--line); display: grid; place-items: center; color: var(--ink); }
+.sq-pts b { display: block; font-weight: 600; font-size: 15px; }
+.sq-pts span { color: var(--ink-2); font-size: 14px; }
+.sqd-stage { border-radius: 26px; padding: 28px; background: linear-gradient(150deg, #7ea9ee, #b9d1f6 60%, #d9e6fa); box-shadow: 0 40px 80px -40px rgba(20,40,100,.5); }
+.sqd { background: rgba(255,255,255,.96); border-radius: 18px; box-shadow: 0 30px 70px -30px rgba(10,20,60,.45); overflow: hidden; font-size: 13px; }
+.sqd-h { display: flex; align-items: center; gap: 8px; padding: 14px 16px 0; font-weight: 600; }
+.sqd-pill { margin-left: auto; font-size: 11.5px; font-weight: 600; padding: 3px 10px; border-radius: 999px; background: #fff4e5; color: #b45309; display: inline-flex; align-items: center; gap: 6px; }
+.sqd-pill .spin { width: 9px; height: 9px; border-width: 1.6px; border-color: #b45309; border-right-color: transparent; }
+.sqd-pill.done { background: #e8f7ee; color: #15803d; }
+.sqd-goal { padding: 6px 16px 0; font-size: 14px; color: var(--ink); line-height: 1.4; }
+.sqd-sub { padding: 4px 16px 0; color: var(--ink-3); font-size: 12px; font-variant-numeric: tabular-nums; min-height: 18px; }
+.sqd-sub b { color: #15803d; font-weight: 600; }
+.sqd-bar { margin: 10px 16px 0; height: 4px; border-radius: 4px; background: #edf0f4; overflow: hidden; }
+.sqd-bar i { display: block; height: 100%; width: 0; background: var(--ink); border-radius: 4px; transition: width .6s cubic-bezier(.2,.8,.2,1); }
+.sqd-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; padding: 12px 16px 16px; }
+.st { border: 1px solid #e9ecf1; border-radius: 12px; overflow: hidden; background: #fff; transition: border-color .3s, box-shadow .3s; }
+.st.s-work { border-color: #d9e2f2; box-shadow: 0 0 0 3px rgba(59,130,246,.08); }
+.st-scr { aspect-ratio: 16 / 10; position: relative; background: #f7f9fc; overflow: hidden; }
+.st-url { display: flex; align-items: center; gap: 5px; height: 18px; padding: 0 7px; background: #eef1f6; font-size: 9.5px; color: var(--ink-3); white-space: nowrap; }
+.st-url img { width: 10px; height: 10px; }
+.st-pg { padding: 7px; display: grid; gap: 5px; }
+.st-pg i { display: block; height: 5px; border-radius: 3px; background: #e3e8f0; }
+.st-cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-top: 3px; }
+.st-cols span { height: 30px; border-radius: 4px; background: #eef2f8; position: relative; overflow: hidden; }
+.st.s-work .st-pg::after { content: ""; position: absolute; left: 0; right: 0; height: 30%; top: 18px; background: linear-gradient(180deg, transparent, rgba(59,130,246,.10), transparent); animation: scan 2.2s ease-in-out infinite; }
+@keyframes scan { 0% { transform: translateY(-20%); } 100% { transform: translateY(260%); } }
+.st-cursor { position: absolute; width: 10px; height: 10px; border-radius: 50%; background: rgba(59,130,246,.85); box-shadow: 0 0 0 4px rgba(59,130,246,.2); opacity: 0; transition: left 1s cubic-bezier(.4,0,.2,1), top 1s cubic-bezier(.4,0,.2,1), opacity .3s; }
+.st.s-work .st-cursor { opacity: 1; }
+.st-done { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(240,250,244,.86); opacity: 0; transition: opacity .35s; }
+.st-done span { width: 30px; height: 30px; border-radius: 50%; background: #16a34a; color: #fff; display: grid; place-items: center; transform: scale(.4); transition: transform .45s cubic-bezier(.2,1.6,.4,1); }
+.st.s-ok .st-done { opacity: 1; }
+.st.s-ok .st-done span { transform: none; }
+.st-wait { position: absolute; inset: 0; display: grid; place-items: center; background: #f5f7fa; color: var(--ink-3); font-size: 10.5px; transition: opacity .3s; }
+.st:not(.s-queued) .st-wait { opacity: 0; pointer-events: none; }
+.st-meta { display: flex; align-items: center; gap: 7px; padding: 7px 8px; min-width: 0; }
+.st-meta img { width: 16px; height: 16px; object-fit: contain; flex: none; }
+.st-meta div { min-width: 0; display: grid; }
+.st-meta b { font-size: 11.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.st-meta em { font-style: normal; font-size: 10.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.sqd-out { display: flex; gap: 10px; align-items: center; margin: 0 16px 16px; padding: 10px 12px; border-radius: 12px; background: #f5f7fb; font-size: 12.5px; color: var(--ink-2); opacity: 0; transform: translateY(6px); transition: opacity .4s, transform .4s; }
+.sqd-out.on { opacity: 1; transform: none; }
+.sqd-out .doc { width: 30px; height: 30px; border-radius: 8px; background: #e8f0fe; color: #2563eb; display: grid; place-items: center; flex: none; }
+.sqd-out b { color: var(--ink); font-weight: 600; }
+/* Speed */
+.speed { display: grid; grid-template-columns: 1fr 1.2fr; gap: 56px; align-items: center; }
+.big-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 30px; }
+.big-stats div { background: #fff; border-radius: 18px; padding: 18px; box-shadow: inset 0 0 0 1px var(--line); }
+.big-stats b { display: block; font: 600 34px var(--head); letter-spacing: -.04em; }
+.big-stats span { font-size: 13px; color: var(--ink-2); }
+.bench { background: #fff; border-radius: 24px; padding: 26px; box-shadow: inset 0 0 0 1px var(--line), 0 30px 60px -40px rgba(10,20,60,.35); }
+.bench-h { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 18px; }
+.bench-h b { font-weight: 600; font-size: 15px; }
+.key { display: flex; gap: 14px; font-size: 12px; color: var(--ink-3); }
+.key span { display: inline-flex; align-items: center; gap: 6px; }
+.key i { width: 10px; height: 10px; border-radius: 3px; background: #d6dbe4; }
+.key span + span i { background: #2f6fe4; }
+.brow { display: grid; grid-template-columns: 150px 1fr; gap: 14px; align-items: center; padding: 10px 0; border-top: 1px solid #f0f2f6; }
+.brow > b { font-weight: 500; font-size: 13.5px; color: var(--ink); }
+.bars { display: grid; gap: 5px; }
+.b { position: relative; height: 18px; border-radius: 6px; background: #d6dbe4; width: 0; transition: width 1.1s cubic-bezier(.2,.8,.2,1); }
+.b.new { background: #2f6fe4; }
+.b em { position: absolute; left: calc(100% + 8px); top: 0; font-style: normal; font-size: 12px; line-height: 18px; color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.b.fail { background: repeating-linear-gradient(135deg, #e7b2a8 0 6px, #f2cfc8 6px 12px); }
+.bench-f { margin-top: 14px; font-size: 12.5px; color: var(--ink-3); }
+/* new feature visuals */
+.rdy { display: flex; align-items: center; gap: 8px; background: #fff; border: 1px solid #e7eaf0; border-radius: 12px; padding: 9px 10px 9px 12px; }
+.rdy span { flex: 1; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rdy .chip { flex: none; display: inline-flex; align-items: center; gap: 4px; font-weight: 600; font-size: 11.5px; color: #15803d; background: #e8f7ee; border-radius: 999px; padding: 3px 8px 3px 6px; animation: pop 2.4s ease-in-out infinite; }
+@keyframes pop { 0%, 30% { opacity: 0; transform: scale(.85); } 40%, 100% { opacity: 1; transform: none; } }
+.rdy .go { width: 24px; height: 24px; border-radius: 50%; background: var(--ink); flex: none; }
+.lgline { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-top: 1px solid #e9edf3; color: var(--ink-2); }
+.lgline:first-child { border-top: 0; }
+.lgline img { width: 16px; height: 16px; object-fit: contain; flex: none; }
+.lgline small { margin-left: auto; color: #15803d; font-weight: 600; font-size: 11.5px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.dchip { display: flex; align-items: center; gap: 8px; background: #fff; border: 1px solid #e7eaf0; border-radius: 10px; padding: 5px 10px 5px 5px; }
+.dchip i { width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; flex: none; }
+.dchip b { font-weight: 600; font-size: 12px; display: block; }
+.dchip small { font-size: 10.5px; color: var(--ink-3); }
+.pkgs { display: flex; flex-wrap: wrap; gap: 6px; }
+.pkgs span { background: #fff; border: 1px solid #e7eaf0; border-radius: 999px; padding: 4px 10px; font-size: 12px; color: var(--ink-2); }
+.wd { display: grid; gap: 8px; }
+.wd div { display: flex; align-items: center; gap: 8px; color: var(--ink-2); }
+.wd i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+@media (max-width: 960px) {
+  .sq-sec, .speed { grid-template-columns: 1fr; gap: 32px; }
+  .sqd-stage { padding: 14px; }
+  .brow { grid-template-columns: 110px 1fr; }
+  .big-stats b { font-size: 26px; }
+}
+@media (max-width: 560px) { .sqd-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .big-stats { grid-template-columns: 1fr 1fr 1fr; gap: 8px; } .big-stats div { padding: 12px; } .big-stats b { font-size: 22px; } }
 </style>
 </head>
 <body>
@@ -296,6 +413,8 @@ footer { padding: 64px 0 40px; }
     </a>
     <nav class="menu">
       <a href="#how">How it works</a>
+      <a href="#squads">Squads</a>
+      <a href="#speed">Speed</a>
       <a href="#features">Features</a>
       <a href="#apps">Apps</a>
       <a href="#install">Install</a>
@@ -317,6 +436,7 @@ footer { padding: 64px 0 40px; }
   <div class="glow"></div>
   <div class="wrap">
     <svg class="mark-hero" viewBox="0 0 512 512" aria-hidden="true"><rect width="512" height="512" rx="128" fill="#0e1116"/><circle cx="200" cy="256" r="90" fill="none" stroke="#fff" stroke-width="42"/><circle cx="312" cy="256" r="90" fill="none" stroke="#8fb4f5" stroke-width="42"/></svg>
+    <a class="new-pill" href="#squads"><span><b>New in 0.5:</b> Squads, five Bots on one job at once</span><i>See it<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></i></a>
     <h1>Coworkers that do the work.</h1>
     <p class="sub">Meet your Bots. They sign in to your apps and get it done, on your Mac, for free.</p>
     <a class="ask" href="#install" aria-label="Install Tandem">
@@ -384,11 +504,16 @@ footer { padding: 64px 0 40px; }
   <div class="wrap strip-in">
     <div class="cell"><b>$0</b><span>Free forever, MIT license</span></div>
     <div class="cell"><b>70+</b><span>Apps your Bots can use</span></div>
-    <div class="cell"><b>1 line</b><span>To install on a Mac</span></div>
+    <div class="cell"><b>4x</b><span>Faster on real tasks in 0.5</span></div>
     <div class="cell"><b>0</b><span>Accounts to create</span></div>
     <div class="cell txt"><h3>Open source, built in the open.</h3><p>Read every line, change anything. If it saves you time, a star helps other people find it.</p>
       <div><a class="pill ghost" href="https://github.com/NeilGilani/tandem" target="_blank" rel="noopener" style="height:34px;font-size:13px"><svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.75.75 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25Z"/></svg>Star on GitHub <span data-stars></span></a></div></div>
   </div>
+</div>
+
+<div class="marquee">
+  <p class="mq-t">Signs in to the apps you already use</p>
+  <div class="mq"><div class="mq-row" id="mq1"></div><div class="mq-row rev" id="mq2"></div></div>
 </div>
 
 <!-- ============ HOW IT WORKS ============ -->
@@ -470,6 +595,55 @@ footer { padding: 64px 0 40px; }
 </section>
 
 <!-- ============ FEATURES BAND ============ -->
+<!-- ============ SQUADS ============ -->
+<section id="squads">
+  <div class="wrap sq-sec">
+    <div class="rv">
+      <span class="kicker">New in 0.5</span>
+      <h2 class="sec-title">One job. Five Bots.<br>All at the same time.</h2>
+      <p class="sec-sub">Ask for something big and your Bot splits it up. Helpers take a piece each and work side by side. Then the lead checks every part and hands you one answer.</p>
+      <div class="sq-pts">
+        <div><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="12" rx="2"/><path d="M12 16.5v3M8.5 19.5h7"/></svg></span><p><b>A computer for every helper</b><span>Each one starts as a copy of the lead's, already signed in to your apps.</span></p></div>
+        <div><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/></svg></span><p><b>Watch every screen live</b><span>A grid of helpers in your chat, each showing its browser as it works.</span></p></div>
+        <div><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><p><b>Checked and merged for you</b><span>The lead reads every part, fills the gaps, and gives you one finished result.</span></p></div>
+      </div>
+    </div>
+    <div class="sqd-stage rv">
+      <div class="sqd" id="sqd">
+        <div class="sqd-h">Squad<span class="sqd-pill" id="sqdPill"><span class="spin"></span>Working</span></div>
+        <div class="sqd-goal">Compare pricing for Linear, Notion, Asana, ClickUp and Monday.com, and find the cheapest for a team of 10.</div>
+        <div class="sqd-sub" id="sqdSub">Starting 5 helpers</div>
+        <div class="sqd-bar"><i id="sqdBar"></i></div>
+        <div class="sqd-grid" id="sqdGrid"></div>
+        <div class="sqd-out" id="sqdOut"><span class="doc"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3.5H7A1.5 1.5 0 0 0 5.5 5v14A1.5 1.5 0 0 0 7 20.5h10a1.5 1.5 0 0 0 1.5-1.5V8z"/><path d="M14 3.5V8h4.5"/></svg></span><div><b>comparison.md</b> · ClickUp Core and monday.com Basic tie for cheapest at $1,080 a year for 10 people.</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ SPEED ============ -->
+<section id="speed">
+  <div class="wrap speed">
+    <div class="rv">
+      <h2 class="sec-title">Built to finish, not to chat.</h2>
+      <p class="sec-sub">We ran the same four real tasks on the last version and on 0.5: scraping, research, comparing plans and building a report with a chart.</p>
+      <div class="big-stats">
+        <div><b>4x</b><span>faster overall</span></div>
+        <div><b>4 of 4</b><span>finished, up from 3</span></div>
+        <div><b>0</b><span>times it stopped to ask, down from 6</span></div>
+      </div>
+    </div>
+    <div class="bench rv" id="bench">
+      <div class="bench-h"><b>Time to finish, in seconds</b><div class="key"><span><i></i>0.4</span><span><i></i>0.5</span></div></div>
+      <div class="brow"><b>Top 10 on Hacker News</b><div class="bars"><i class="b" data-w="37"><em>37s</em></i><i class="b new" data-w="40"><em>40s</em></i></div></div>
+      <div class="brow"><b>Raspberry Pi prices</b><div class="bars"><i class="b" data-w="142"><em>142s</em></i><i class="b new" data-w="117"><em>117s</em></i></div></div>
+      <div class="brow"><b>Compare three plans</b><div class="bars"><i class="b" data-w="182"><em>182s</em></i><i class="b new" data-w="121"><em>121s</em></i></div></div>
+      <div class="brow"><b>Sales report and chart</b><div class="bars"><i class="b fail" data-w="235"><em>Gave up after 15 min</em></i><i class="b new" data-w="30"><em>30s</em></i></div></div>
+      <p class="bench-f">One run of each task on a MacBook. The benchmark is in the repo, so you can run it yourself.</p>
+    </div>
+  </div>
+</section>
+
 <div class="band" id="features">
   <div class="wrap" style="position:relative">
     <h2 class="sec-title rv">Built for real work.</h2>
@@ -518,6 +692,38 @@ footer { padding: 64px 0 40px; }
           <div class="warn">Shares your data outside this chat</div>
           <div style="display:flex;gap:6px;flex-wrap:wrap"><span class="btn-s dark">Allow once</span><span class="btn-s">Always allow</span><span class="btn-s" style="color:#b91c1c">Deny</span></div>
         </div>
+      </div>
+      <div class="f rv">
+        <div><h3>Starts before you hit Enter.</h3><p>As you type, your Bot wakes up and gets ready. Work begins about 5 seconds sooner.</p></div>
+        <div class="vis"><div class="rdy"><span>Find every invoice from October…</span><span class="chip"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M13 3 5.5 13.5H12L11 21l7.5-10.5H12z"/></svg>Ready</span><span class="go"></span></div></div>
+      </div>
+      <div class="f rv">
+        <div><h3>Pulls the data, skips the clicking.</h3><p>Bots read a site's own data with their sign-in instead of scrolling page by page.</p></div>
+        <div class="vis">
+          <div class="lgline"><img src="logos/gmail.png" alt="">Inbox, 2,140 threads<small>12s</small></div>
+          <div class="lgline"><img src="logos/gsheets.png" alt="">Q3 pipeline as CSV<small>2s</small></div>
+          <div class="lgline"><img src="logos/hubspot.png" alt="">All 860 contacts<small>9s</small></div>
+        </div>
+      </div>
+      <div class="f rv">
+        <div><h3>Comes back with the files.</h3><p>Sheets, charts and docs show up under the answer and open right in the app.</p></div>
+        <div class="vis"><div class="chips">
+          <span class="dchip"><i style="background:#e8f5ec;color:#16a34a"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M3.5 14.5h17M9.5 9.5v10"/></svg></i><span><b>plans.csv</b><small>Spreadsheet</small></span></span>
+          <span class="dchip"><i style="background:#eef2fe;color:#2563eb"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg></i><span><b>chart.png</b><small>Image</small></span></span>
+          <span class="dchip"><i style="background:#f1edfe;color:#7c3aed"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3.5H7A1.5 1.5 0 0 0 5.5 5v14A1.5 1.5 0 0 0 7 20.5h10a1.5 1.5 0 0 0 1.5-1.5V8z"/><path d="M14 3.5V8h4.5"/></svg></i><span><b>summary.md</b><small>Document</small></span></span>
+        </div></div>
+      </div>
+      <div class="f wide rv">
+        <div><h3>Tools ready before the job starts.</h3><p>Every Bot gets a ready-made Python toolbox, so charts, spreadsheets and reports never wait on installs.</p></div>
+        <div class="vis"><div class="pkgs"><span>Data and stats</span><span>Charts</span><span>Excel</span><span>Word</span><span>PowerPoint</span><span>PDF</span><span>Web scraping</span><span>Images</span></div></div>
+      </div>
+      <div class="f wide rv">
+        <div><h3>Never stuck for long.</h3><p>If a step hangs, Tandem restarts it and the Bot picks up where it left off. Long missions keep going overnight.</p></div>
+        <div class="vis"><div class="wd">
+          <div><i style="background:#f59e0b"></i>A browser step stopped responding</div>
+          <div><i style="background:#3b82f6"></i>Restarted on its own</div>
+          <div><i style="background:#16a34a"></i>Picked up at step 14 of 22, nothing repeated</div>
+        </div></div>
       </div>
     </div>
   </div>
@@ -578,6 +784,7 @@ footer { padding: 64px 0 40px; }
       <details open><summary>What is Tandem?</summary><p>Tandem gives you AI Bots that work like coworkers. Each one has a job, a memory and a computer to work on. They sign in to your apps, do the work, and check with you before anything goes out.</p></details>
       <details><summary>Is it really free?</summary><p>Yes. Tandem is MIT-licensed with no paid tier. The AI comes from your own Claude Code plan, so Bot replies count toward that plan's usage limits like any other Claude Code session.</p></details>
       <details><summary>Does a Bot do anything without asking me?</summary><p>Not by default. Emails and messages arrive as drafts with a Send button, and anything that sends, buys, deletes or posts waits for your OK. You can loosen or tighten that with your own rules.</p></details>
+      <details><summary>What is a squad, and does it cost more?</summary><p>A squad is one job split across several helper Bots that work at the same time, each on its own computer. Your Bot decides when a job is big enough, or you can just ask for one. Each helper uses your Claude plan while it works, so a five-part squad uses it about five times as fast, for a fraction of the time.</p></details>
       <details><summary>Do Bots share a computer?</summary><p>No. Every Bot gets its own computer, with its own browser, its own sign-ins and its own files. A shared folder lets them hand work to each other. So your Sales Bot can be signed in to Salesforce while your Inbox Bot only sees email.</p></details>
       <details><summary>What about passwords and 2FA?</summary><p>Saved logins live in your Mac's Keychain and are filled in for the Bot, which never sees them. For passkeys, codes and CAPTCHAs, the Bot hands you the screen. You do that one step and press I'm done.</p></details>
       <details><summary>Does it work when my laptop is closed?</summary><p>Bots run on your Mac, so they work whenever it's awake. Tandem starts at login and keeps going with the window closed. For round-the-clock routines, run it on a Mac mini that stays on.</p></details>
@@ -697,20 +904,21 @@ function show(i) {
 steps.forEach((s, i) => s.addEventListener('click', () => show(i)));
 show(0);
 
+const LOGOS = {"gmail": "logos/gmail.png", "outlook": "logos/outlook.svg", "teams": "logos/teams.svg", "slack": "logos/slack.png", "gcal": "logos/gcal.png", "salesforce": "logos/salesforce.png", "hubspot": "logos/hubspot.png", "linkedin": "logos/linkedin.png", "notion": "logos/notion.png", "gdrive": "logos/gdrive.png", "gsheets": "logos/gsheets.png", "jira": "logos/jira.svg", "linear": "logos/linear.svg", "stripe": "logos/stripe.svg", "quickbooks": "logos/quickbooks.svg", "shopify": "logos/shopify.png", "expensify": "logos/expensify.png"};
 const TILES = [
-  ['gm', 'M', '#ea4335'], ['ol', 'O', '#0078d4'], ['tm', 'T', '#5b5fc7'], ['sl', 'S', '#611f69'], ['gc', '31', '#4285f4'],
-  ['sf', 'S', '#00a1e0'], ['hs', 'H', '#ff7a59'], ['vault', 'lock', '#3a4252'], ['li', 'in', '#0a66c2'], ['nt', 'N', '#2f3437'],
-  ['gd', 'D', '#0f9d58'], ['gs', 'S', '#188038'], ['core', '', ''], ['ji', 'J', '#0052cc'], ['ln', 'L', '#5e6ad2'],
-  ['st', 'S', '#635bff'], ['qb', 'qb', '#2ca01c'], ['mcp', 'plug', '#4b5563'], ['sh', 'S', '#5e8e3e'], ['ex', 'E', '#0185ff'],
+  ['gm', 'gmail'], ['ol', 'outlook'], ['tm', 'teams'], ['sl', 'slack'], ['gc', 'gcal'],
+  ['sf', 'salesforce'], ['hs', 'hubspot'], ['vault', 'lock'], ['li', 'linkedin'], ['nt', 'notion'],
+  ['gd', 'gdrive'], ['gs', 'gsheets'], ['core', ''], ['ji', 'jira'], ['ln', 'linear'],
+  ['st', 'stripe'], ['qb', 'quickbooks'], ['mcp', 'plug'], ['sh', 'shopify'], ['ex', 'expensify'],
 ];
 const ICONS = {
-  lock: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>',
-  plug: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0zM12 18v4"/></svg>',
+  lock: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>',
+  plug: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0zM12 18v4"/></svg>',
 };
 const tiles = document.getElementById('tiles');
-tiles.innerHTML = TILES.map(([id, t, c]) => id === 'core'
+tiles.innerHTML = TILES.map(([id, k]) => id === 'core'
   ? `<div class="tile core"><svg width="34" height="34" viewBox="0 0 512 512"><circle cx="200" cy="256" r="90" fill="none" stroke="#fff" stroke-width="44"/><circle cx="312" cy="256" r="90" fill="none" stroke="#0e1116" stroke-opacity=".55" stroke-width="44"/></svg></div>`
-  : `<div class="tile" data-id="${id}" style="--c:${c}">${ICONS[t] || t}</div>`).join('');
+  : `<div class="tile${LOGOS[k] ? ' logo' : ''}" data-id="${id}">${LOGOS[k] ? `<img src="${LOGOS[k]}" alt="" loading="lazy">` : ICONS[k]}</div>`).join('');
 const accItems = [...document.querySelectorAll('#acc .acc-i')];
 let accCur = 0, accTimer;
 function lightAcc(i) {
@@ -723,6 +931,79 @@ function lightAcc(i) {
 }
 accItems.forEach((a, i) => a.addEventListener('click', () => lightAcc(i)));
 lightAcc(0);
+
+
+// Logo marquee
+const MQ = ["logos/gmail.png", "logos/outlook.svg", "logos/slack.png", "logos/teams.svg", "logos/notion.png", "logos/salesforce.png", "logos/hubspot.png", "logos/linkedin.png", "logos/gcal.png", "logos/gdrive.png", "logos/gsheets.png", "logos/gdocs.png", "logos/jira.svg", "logos/linear.svg", "logos/asana.svg", "logos/trello.svg", "logos/clickup.svg", "logos/monday.png", "logos/airtable.svg", "logos/figma.svg", "logos/canva.png", "logos/github.svg", "logos/gitlab.png", "logos/vercel.svg", "logos/stripe.svg", "logos/quickbooks.svg", "logos/xero.svg", "logos/shopify.png", "logos/zendesk.svg", "logos/intercom.png", "logos/zoom.png", "logos/gmeet.png", "logos/dropbox.svg", "logos/box.svg", "logos/calendly.svg", "logos/mailchimp.png", "logos/x.png", "logos/instagram.svg", "logos/youtube.svg", "logos/reddit.png", "logos/whatsapp.svg", "logos/discord.png", "logos/excel.svg", "logos/word.svg", "logos/powerpoint.svg", "logos/onedrive.svg", "logos/sharepoint.svg", "logos/pipedrive.png", "logos/apollo.svg", "logos/datadog.png", "logos/sentry.png", "logos/amazon.svg"];
+const fillRow = (el, list) => { const html = list.map((u) => `<span class="mq-logo"><img src="${u}" alt="" loading="lazy"></span>`).join(''); el.innerHTML = html + html; };
+fillRow(document.getElementById('mq1'), MQ.slice(0, 26));
+fillRow(document.getElementById('mq2'), MQ.slice(26));
+
+// Squad demo: five helpers, four at a time, then the lead merges.
+(() => {
+  const P = [
+    ['Linear pricing', 'linear.app/pricing', "logos/linear.svg", 0.0, 3.71],
+    ['Notion pricing', 'notion.com/pricing', "logos/notion.png", 0.0, 5.64],
+    ['Asana pricing', 'asana.com/pricing', "logos/asana.svg", 0.0, 4.43],
+    ['ClickUp pricing', 'clickup.com/pricing', "logos/clickup.svg", 0.0, 5.21],
+    ['Monday.com pricing', 'monday.com/pricing', "logos/monday.png", 3.71, 16.86],
+  ];
+  const LINES = ['Opening the pricing page', 'Switching to annual billing', 'Reading every plan', 'Checking the free plan limits', 'Writing the results'];
+  const grid = document.getElementById('sqdGrid'), sub = document.getElementById('sqdSub'), bar = document.getElementById('sqdBar'), pill = document.getElementById('sqdPill'), out = document.getElementById('sqdOut');
+  if (!grid) return;
+  grid.innerHTML = P.map(([t, url, logo]) => `<div class="st s-queued"><div class="st-scr"><div class="st-url"><img src="${logo}" alt="">${url}</div><div class="st-pg"><i style="width:60%"></i><i style="width:85%"></i><div class="st-cols"><span></span><span></span><span></span></div><i style="width:40%"></i></div><span class="st-cursor"></span><div class="st-done"><span><svg width=\"15\" height=\"15\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"3\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M5 12.5l4.5 4.5L19 7.5\"/></svg></span></div><div class="st-wait">Waiting for a free helper</div></div><div class="st-meta"><img src="${logo}" alt=""><div><b>${t}</b><em>Queued</em></div></div></div>`).join('');
+  const tiles = [...grid.children];
+  const SCALE = 14; // one demo second is 14 real seconds
+  const fmt = (s) => { s = Math.round(s); return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`; };
+  let t0 = 0, raf = 0, running = false;
+  function frame(now) {
+    const t = (now - t0) / 1000;
+    let done = 0, working = 0;
+    tiles.forEach((el, i) => {
+      const [, , , start, end] = P[i];
+      const st = t < start ? 'queued' : t < end ? 'work' : 'ok';
+      el.className = `st s-${st}`;
+      const em = el.querySelector('em');
+      if (st === 'work') {
+        working++;
+        const k = Math.min(LINES.length - 1, Math.floor(((t - start) / (end - start)) * LINES.length));
+        em.textContent = `${LINES[k]} · ${fmt((t - start) * SCALE)}`;
+        const c = el.querySelector('.st-cursor');
+        const phase = Math.floor((t - start) * 0.9 + i);
+        c.style.left = `${15 + ((phase * 37) % 70)}%`; c.style.top = `${30 + ((phase * 23) % 55)}%`;
+      } else if (st === 'ok') { done++; em.textContent = `Done in ${fmt((end - start) * SCALE)}`; }
+      else em.textContent = 'Queued';
+    });
+    bar.style.width = `${(done / P.length) * 100}%`;
+    const merging = t >= 16.86 && t < 19.86, finished = t >= 19.86;
+    if (finished) {
+      pill.className = 'sqd-pill done'; pill.textContent = 'Done';
+      sub.innerHTML = `5 parts done in parallel · <b>7m 30s of work in 4m 38s</b>`;
+      out.classList.add('on');
+    } else {
+      pill.className = 'sqd-pill'; pill.innerHTML = '<span class="spin"></span>' + (merging ? 'Merging' : 'Working');
+      sub.textContent = merging ? 'All 5 parts back · checking and merging' : `${working} working at once · ${done} of 5 done · ${fmt(t * SCALE)}`;
+      out.classList.remove('on');
+    }
+    if (t > 26) t0 = now;
+    if (running) raf = requestAnimationFrame(frame);
+  }
+  new IntersectionObserver(([e]) => {
+    if (e.isIntersecting && !running) { running = true; t0 = performance.now(); raf = requestAnimationFrame(frame); }
+    else if (!e.isIntersecting && running) { running = false; cancelAnimationFrame(raf); }
+  }, { threshold: .25 }).observe(document.getElementById('sqd'));
+})();
+
+// Benchmark bars grow when they come into view.
+(() => {
+  const el = document.getElementById('bench');
+  if (!el) return;
+  new IntersectionObserver(([e], o) => {
+    if (!e.isIntersecting) return;
+    el.querySelectorAll('.b').forEach((b, i) => setTimeout(() => { b.style.width = `${(Number(b.dataset.w) / 300) * 72}%`; }, i * 90));
+    o.disconnect();
+  }, { threshold: .3 }).observe(el);
+})();
 
 let pending = [...document.querySelectorAll('.rv')];
 const nav = document.getElementById('nav');
