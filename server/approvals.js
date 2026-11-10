@@ -17,6 +17,7 @@ import { quickJson } from './claude.js';
 import * as chats from './chats.js';
 import * as computer from './computer.js';
 import { emit } from './bus.js';
+import * as activity from './activity.js';
 
 const RULE_LIMIT = 20;
 const BACKGROUND_TTL = 30 * 60 * 1000;
@@ -240,8 +241,9 @@ function ask(tool, input, summary, pageUrl, ctx, { kind, reason, warnings = [] }
   };
   const msg = chats.addMessage({ chatId: ctx.chatId, author: 'bot', botId: ctx.botId, text: '', card });
   emit('notify', { botId: ctx.botId, chatId: ctx.chatId, title: 'Approval needed', body: summary });
+  const actId = activity.log({ runId: ctx.runId, botId: ctx.botId, chatId: ctx.chatId, kind: 'approval', tool, summary: `Asked to: ${summary}`, detail: card.command || null, status: 'pending', origin: ctx.origin });
   return new Promise((resolve) => {
-    const entry = { resolve, input, ctx, summary, structured: s };
+    const entry = { resolve, input, ctx, summary, structured: s, actId };
     if (background) entry.timer = setTimeout(() => answer(msg.id, 'expire'), BACKGROUND_TTL);
     pending.set(msg.id, entry);
   });
@@ -256,6 +258,7 @@ export function answer(msgId, choice) {
   const card = { ...msg.card };
   if (choice === 'allow' || choice === 'always') {
     card.status = 'allowed';
+    activity.finish(p.actId, 'allowed');
     if (choice === 'always' && card.allowAlways && p.structured) {
       addRule('allow', p.structured.text, { tool: p.structured.tool, pattern: p.structured.pattern });
       card.saved = `Saved: ${p.structured.text}`;
@@ -264,6 +267,7 @@ export function answer(msgId, choice) {
     p.resolve({ behavior: 'allow', updatedInput: p.input });
   } else {
     card.status = choice === 'expire' ? 'expired' : 'denied';
+    activity.finish(p.actId, card.status);
     chats.updateMessage(msgId, { card });
     p.resolve({
       behavior: 'deny',

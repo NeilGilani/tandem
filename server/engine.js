@@ -15,6 +15,7 @@ import * as approvals from './approvals.js';
 import * as connectors from './connectors.js';
 import * as computer from './computer.js';
 import * as memory from './memory.js';
+import * as activity from './activity.js';
 
 export let PORT = 4747;
 export const setPort = (p) => { PORT = p; };
@@ -128,7 +129,7 @@ function start(botId, chatId, text, opts) {
   if (!bot || !chat) return Promise.resolve({ error: 'Bot or chat not found' });
   const id = uid('run_');
   const model = opts.model || pickModel(text, { origin: opts.origin, attachments: (opts.attachments || []).length });
-  const runCtx = { id, botId, chatId, origin: opts.origin, model, status: 'Thinking', started: now(), messageId: null, text: '', opts, steps: [], tail: [] };
+  const runCtx = { id, botId, chatId, origin: opts.origin, model, status: 'Thinking', started: now(), messageId: null, text: '', opts, steps: [], tail: [], toolActs: new Map() };
   const key = `${chatId}:${botId}`;
 
   let fullText = text;
@@ -160,6 +161,7 @@ function start(botId, chatId, text, opts) {
   let resolveDone;
   runCtx.done = new Promise((r) => (resolveDone = r));
   active.set(key, runCtx);
+  runCtx.runAct = activity.log({ runId: id, botId, chatId, kind: 'run', summary: opts.origin === 'routine' ? text.split(':')[0] : opts.origin === 'handoff' ? 'Picked up a handoff' : `Started: ${text.replace(/^\[[^\]]*\]\s*/, '').slice(0, 120)}`, status: 'running', origin: opts.origin });
   runCtx.status = 'Starting its computer';
   emit('run', publicRun(runCtx));
   // Each Bot has its own computer; make sure its browser is up before Claude Code starts.
@@ -234,8 +236,24 @@ function start(botId, chatId, text, opts) {
           runCtx.steps.push({ k: 'tool', t: label });
           runCtx.tail = [];
           setStatus(label);
+          if (block.name !== 'mcp__tandem__approval_prompt') {
+            const detail = block.name === 'Bash' ? block.input?.command : block.input?.url || block.input?.element || null;
+            runCtx.toolActs.set(block.id, activity.log({ runId: id, botId, chatId, kind: 'tool', tool: block.name, summary: label, detail, status: 'running', origin: opts.origin }));
+          }
         } else if (block.type === 'thinking') setStatus('Thinking');
       }
+    } else if (evt.type === 'user') {
+      for (const block of evt.message?.content || []) {
+        if (block.type !== 'tool_result') continue;
+        const actId = runCtx.toolActs.get(block.tool_use_id);
+        if (!actId) continue;
+        const txt = Array.isArray(block.content) ? block.content.map((c) => c.text || '').join(' ') : String(block.content || '');
+        const denied = /denied this action|set to Never allow/i.test(txt);
+        activity.finish(actId, denied ? 'denied' : block.is_error ? 'error' : 'ok', block.is_error || denied ? txt.slice(0, 600) : null);
+      }
+    } else if (evt.type === 'rate_limit_event') {
+      runCtx.rate = evt.rate_limit_info;
+      activity.recordPlan(evt.rate_limit_info);
     } else if (evt.type === 'result') {
       resultEvt = evt;
     }
@@ -277,8 +295,25 @@ function start(botId, chatId, text, opts) {
       start(botId, chatId, text, { ...opts, _retried: true }).then(resolveDone);
       return;
     }
+    for (const actId of runCtx.toolActs.values()) activity.finish(actId, runCtx.stopped ? 'stopped' : error ? 'error' : 'ok');
     if (error && !runCtx.stopped) {
-      chats.addMessage({ chatId, author: 'system', botId, text: `${bot.name} hit a problem: ${error}`, meta: { error: true } });
+      const errText = `${error} ${stderr}`;
+      const limited = /usage limit|rate.?limit|limit reached|429|quota/i.test(errText) || (runCtx.rate && runCtx.rate.status && runCtx.rate.status !== 'allowed');
+      const transient = /overloaded|529|5\d\d|timeout|timed out|ECONN|EPIPE|socket hang up|network|exited with code|terminated|Internal server error/i.test(errText);
+      const tries = opts._resumes || 0;
+      activity.log({ runId: id, botId, chatId, kind: 'error', summary: limited ? 'Paused: Claude plan limit' : 'Run interrupted', detail: error, status: 'error', origin: opts.origin });
+      if (limited) {
+        const until = (runCtx.rate?.resetsAt ? runCtx.rate.resetsAt * 1000 : activity.plan()?.resetsAt) || now() + 30 * 60e3;
+        const wait = Math.min(Math.max(until - now() + 60e3, 60e3), 6 * 3600e3);
+        chats.addMessage({ chatId, author: 'system', botId, text: `${bot.name} paused: your Claude plan limit is reached. It picks this back up at ${new Date(now() + wait).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`, meta: { kind: 'paused' } });
+        setTimeout(() => resume(botId, chatId, opts, 'Your plan limit has reset.'), wait);
+      } else if (transient && tries < 2) {
+        const wait = tries === 0 ? 20e3 : 90e3;
+        chats.addMessage({ chatId, author: 'system', botId, text: `${bot.name} was interrupted and will pick up where it left off.`, meta: { kind: 'resuming' } });
+        setTimeout(() => resume(botId, chatId, { ...opts, _resumes: tries + 1 }, `Your previous attempt was interrupted by an error (${String(error).slice(0, 200)}).`), wait);
+      } else {
+        chats.addMessage({ chatId, author: 'system', botId, text: `${bot.name} hit a problem: ${error}`, meta: { error: true } });
+      }
     }
     if (!resultEvt && runCtx.stopped && runCtx.tail.length) postFinal(runCtx.tail.join('\n\n'));
     if (runCtx.stopped && !runCtx.silentStop) chats.addMessage({ chatId, author: 'system', botId, text: `${bot.name} stopped. Work already done isn't undone.` });
@@ -288,9 +323,18 @@ function start(botId, chatId, text, opts) {
     // Bot-to-bot: the reply lands back where the handoff came from.
     if (opts.replyTo && runCtx.text && !error) deliverReply(botId, opts.replyTo, runCtx.text, opts.depth || 0);
     computer.touch(botId);
+    activity.finish(runCtx.runAct, runCtx.stopped ? 'stopped' : error ? 'error' : 'ok', runCtx.text ? runCtx.text.slice(0, 1500) : null);
     resolveDone({ error, text: runCtx.text, messageId: runCtx.messageId });
   });
   }
+}
+
+// Pick an interrupted task back up in the same session.
+function resume(botId, chatId, opts, why) {
+  if (!chats.getBot(botId) || !chats.getChat(chatId)) return;
+  if (isRunning(chatId, botId)) return;
+  runBot(botId, chatId, `[${why} Continue the task from where you stopped. First check what is already done, so you don't repeat any action like sending a message twice.]`,
+    { ...opts, origin: opts.origin === 'chat' ? 'system' : opts.origin, attachments: [] });
 }
 
 export function stop(runId, { silent = false } = {}) {
@@ -324,7 +368,7 @@ export function runInDm(botId, text, opts = {}) {
 export async function onUserMessage(chatId, msg) {
   const chat = chats.getChat(chatId);
   const opts = { origin: 'chat', attachments: msg.attachments || [], parentId: msg.parent_id || null };
-  let text = msg.text;
+  let text = msg.meta?.voice ? `[Voice call] ${msg.text}` : msg.text;
   if (msg.parent_id) {
     const parent = chats.getMessage(msg.parent_id);
     if (parent) text = `[Replying in a thread to: "${(parent.text || parent.card?.summary || '').slice(0, 400)}"]\n${text}`;
@@ -365,6 +409,7 @@ export function handoff({ fromBot, fromChat, to, text, expectReply = true, depth
   if (depth > 4) throw new Error('Too many handoffs in a row; finish the work or ask the user.');
   const sender = chats.getBot(fromBot);
   const dm = chats.dmFor(target.id);
+  activity.log({ botId: fromBot, chatId: fromChat, kind: 'handoff', summary: `Handed work to ${target.name}`, detail: text, status: 'ok' });
   chats.addMessage({ chatId: fromChat, author: 'system', botId: fromBot, text: `Sending to ${target.name}`, meta: { kind: 'handoff', from: fromBot, to: target.id, detail: text } });
   chats.addMessage({ chatId: dm.id, author: 'bot', botId: fromBot, text, meta: { handoff: true, to: target.id, fromChat } });
   runBot(target.id, dm.id, `Message from ${sender.name} (another of the user's Bots):\n${text}` +

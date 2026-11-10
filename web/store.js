@@ -6,6 +6,8 @@ export const S = {
   messages: {}, // chatId -> [messages]
   showComputer: (() => { try { return localStorage.getItem('tandem.computer') === '1'; } catch { return false; } })(),
   route: routeFromHash(),
+  pending: [],
+  native: /[?&]app=mac\b/.test(location.search) || !!window.webkit?.messageHandlers?.tandem,
 };
 
 function routeFromHash() {
@@ -13,6 +15,7 @@ function routeFromHash() {
   return name ? { name, id, sub } : { name: 'home' };
 }
 
+const NEEDS_YOU = new Set(['approval', 'draft', 'question', 'secret', 'connect', 'takeover', 'skill_draft']);
 const listeners = new Map();
 export function on(evt, fn) { (listeners.get(evt) || listeners.set(evt, new Set()).get(evt)).add(fn); }
 export function fire(evt, data) { for (const fn of listeners.get(evt) || []) fn(data); }
@@ -62,6 +65,10 @@ export function connectEvents() {
   for (const t of refreshing) es.addEventListener(t, () => refresh());
   es.addEventListener('message', (e) => {
     const m = JSON.parse(e.data);
+    if (m.card && NEEDS_YOU.has(m.card.type)) {
+      S.pending = (S.pending || []).filter((x) => x.id !== m.id);
+      if (m.card.status === 'pending') S.pending.unshift(m);
+    }
     const list = S.messages[m.chat_id];
     if (list) {
       const i = list.findIndex((x) => x.id === m.id);
@@ -78,7 +85,8 @@ export function connectEvents() {
     fire('run', r);
   });
   es.addEventListener('computer', (e) => { const c = JSON.parse(e.data); if (c.botId) S.computers[c.botId] = c; fire('computer', c); });
-  for (const t of ['routines', 'skills', 'library', 'teach.limit']) es.addEventListener(t, (e) => fire(t, JSON.parse(e.data || '{}')));
+  for (const t of ['routines', 'skills', 'library', 'teach.limit', 'activity']) es.addEventListener(t, (e) => fire(t, JSON.parse(e.data || '{}')));
+  es.addEventListener('usage', (e) => { S.settings.plan = JSON.parse(e.data); fire('usage'); });
   es.addEventListener('notify', (e) => fire('notify', JSON.parse(e.data)));
   es.onerror = () => { setTimeout(() => { if (es.readyState === 2) connectEvents(); }, 3000); };
 }

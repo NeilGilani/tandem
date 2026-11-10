@@ -93,16 +93,19 @@ const SHAPE_PATHS = {
 export const SHAPES = Object.keys(SHAPE_PATHS);
 export const COLORS = ['#6d5dfc', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#8b5cf6', '#14b8a6', '#64748b', '#111827'];
 
-export function avatar(bot, size = 28, { blink = false } = {}) {
-  const wrap = h(`span.av${blink ? '.blink' : ''}`, { style: { width: `${size}px`, height: `${size}px` } });
+export function avatar(bot, size = 28, { blink = true, busy = false } = {}) {
+  const wrap = h(`span.av${blink ? '.blink' : ''}${busy ? '.busy' : ''}`, { style: { width: `${size}px`, height: `${size}px` } });
+  if (bot?.id) wrap.dataset.bot = bot.id;
   if (!bot) { wrap.innerHTML = `<svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="46" fill="var(--active)"/></svg>`; return wrap; }
   if (bot.avatar) { wrap.append(h('img', { src: bot.avatar, alt: '' })); return wrap; }
-  // A Bot is a coloured shape with a face.
+  // A Bot is a coloured shape with a face whose eyes follow your cursor (see alive.js).
   const eyeY = bot.shape === 'star' ? 52 : 47;
   const gap = bot.shape === 'diamond' ? 11 : 13;
-  wrap.innerHTML = `<svg viewBox="0 0 100 100"><g fill="${esc(bot.color)}">${SHAPE_PATHS[bot.shape] || SHAPE_PATHS.circle}</g>
-    <g class="eyes"><ellipse cx="${50 - gap}" cy="${eyeY}" rx="7.5" ry="10" fill="#fff"/><ellipse cx="${50 + gap}" cy="${eyeY}" rx="7.5" ry="10" fill="#fff"/>
-    <circle cx="${50 - gap + 1.5}" cy="${eyeY + 2}" r="4" fill="#111"/><circle cx="${50 + gap + 1.5}" cy="${eyeY + 2}" r="4" fill="#111"/></g></svg>`;
+  const delay = (Math.random() * 4).toFixed(2);
+  wrap.innerHTML = `<svg viewBox="0 0 100 100"><g class="body" fill="${esc(bot.color)}">${SHAPE_PATHS[bot.shape] || SHAPE_PATHS.circle}</g>
+    <g class="eyes" style="animation-delay:-${delay}s"><ellipse cx="${50 - gap}" cy="${eyeY}" rx="7.5" ry="10" fill="#fff"/><ellipse cx="${50 + gap}" cy="${eyeY}" rx="7.5" ry="10" fill="#fff"/>
+    <g class="pupils"><circle cx="${50 - gap}" cy="${eyeY + 1.5}" r="4.2" fill="#111"/><circle cx="${50 + gap}" cy="${eyeY + 1.5}" r="4.2" fill="#111"/>
+    <circle cx="${50 - gap + 1.6}" cy="${eyeY - .4}" r="1.2" fill="#fff" opacity=".9"/><circle cx="${50 + gap + 1.6}" cy="${eyeY - .4}" r="1.2" fill="#fff" opacity=".9"/></g></g></svg>`;
   return wrap;
 }
 
@@ -144,7 +147,6 @@ const I = {
   hand: '<path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V12M11 11.5v-8a1.5 1.5 0 0 1 3 0v8M14 11.5V5a1.5 1.5 0 0 1 3 0v8M17 9.5a1.5 1.5 0 0 1 3 0V15a7 7 0 0 1-7 7h-1a7 7 0 0 1-5.5-2.7L3 15.5a1.6 1.6 0 0 1 2.5-2L8 16"/>',
   rec: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5" fill="currentColor"/>',
   key: '<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l3 3M15 8l2 2"/>',
-  phone: '<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/>',
   refresh: '<path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/>',
   open: '<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
   up: '<path d="M12 19V5M5 12l7-7 7 7"/>',
@@ -154,6 +156,12 @@ const I = {
   image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/>',
   sidebar: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>',
   download: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>',
+  activity: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
+  phone: '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/>',
+  hangup: '<path d="M3 15c5-5 13-5 18 0l-2.5 2.5-3.5-1.5v-3a10 10 0 0 0-6 0v3l-3.5 1.5z"/>',
+  home: '<path d="M4 11l8-7 8 7v8a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z"/>',
+  check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  sparkle: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/>',
 };
 export function icon(name) {
   const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');

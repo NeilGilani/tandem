@@ -8,6 +8,13 @@ you already have.
 
 ## Install
 
+**Mac app:** download [Tandem-mac.zip](https://github.com/NeilGilani/tandem/releases/latest/download/Tandem-mac.zip),
+unzip it, and drag Tandem to Applications. It's for Apple silicon and macOS 13 or later, and it bundles its own Node.
+The app isn't notarized yet, so the first time you open it, right-click Tandem and choose **Open**.
+It lives in the menu bar and keeps your Bots working after you close the window.
+
+**Or with Terminal:**
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/NeilGilani/tandem/main/install.sh | bash
 ```
@@ -62,11 +69,18 @@ If you like it, [star the repo](https://github.com/NeilGilani/tandem).
 Every Bot turn, routine run and test run uses your Claude plan's limits. Tandem is for your own
 use on your own subscription. Don't run Bots for other people on it; that needs an API key.
 
+## Build the Mac app
+
+```bash
+macos/build.sh --open     # → dist/Tandem.app and dist/Tandem-mac.zip
+```
+
 ## Layout
 
 ```
 server/   daemon: HTTP API, events, engine (Claude Code runs), approvals, routines, connectors, vault, Mac apps
 mcp/      the per-run MCP bridge that gives Bots the Tandem tools
 web/      the app (no build step)
+macos/    the native Mac app (Swift): window, menu bar, notifications, bundled Node
 data/     everything you create (gitignored): database, memory, skills, uploads, computer
 ```

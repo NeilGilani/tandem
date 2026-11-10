@@ -16,6 +16,7 @@ import * as routines from './routines.js';
 import * as memory from './memory.js';
 import * as vault from './vault.js';
 import { TEMPLATES } from './templates.js';
+import * as activity from './activity.js';
 import { CATEGORIES } from './catalog.js';
 
 const PORT = Number(process.env.PORT || 4747);
@@ -78,9 +79,17 @@ function stateSnapshot() {
     sections: all('SELECT * FROM sections ORDER BY position'),
     runs: engine.activeRuns(),
     computers: computer.statusAll(),
+    pending: pendingCards(),
     connectors: connectors.installed().map(({ id, catalog_id, name, status, color, category, kind }) => ({ id, catalog_id, name, status, color, category, kind })),
     settings: publicSettings(),
   };
+}
+
+// Everything waiting on you, across all chats (approvals, drafts, questions, sign-ins).
+const NEEDS_YOU = new Set(['approval', 'draft', 'question', 'secret', 'connect', 'takeover', 'skill_draft']);
+function pendingCards() {
+  return all(`SELECT * FROM messages WHERE card IS NOT NULL AND card LIKE '%"status":"pending"%' ORDER BY created DESC LIMIT 100`)
+    .map(chats.parseMsg).filter((m) => m.card && m.card.status === 'pending' && NEEDS_YOU.has(m.card.type));
 }
 
 function lastPreview(chatId) {
@@ -99,6 +108,11 @@ function publicSettings() {
     local_execution: setting('local_execution'),
     theme: setting('theme'),
     user_name: setting('user_name') || os.userInfo().username,
+    usage_guard: setting('usage_guard') !== '0',
+    usage_guard_at: Number(setting('usage_guard_at') || 0.9),
+    routine_model: setting('routine_model') || 'balanced',
+    onboarded: setting('onboarded') === '1',
+    plan: activity.plan(),
     rules: approvals.rules(),
     lan: HOST === '0.0.0.0',
     lan_urls: HOST === '0.0.0.0' ? lanUrls().map((u) => `${u}/?token=${setting('access_token')}`) : [],
@@ -174,7 +188,7 @@ route('POST', '/api/chats/:id/messages', async (req, res, p) => {
     engine.stopChat(p.id);
     return m;
   }
-  const msg = chats.addMessage({ chatId: p.id, author: 'user', text, parentId: body.parentId || null, attachments: body.attachments || [] });
+  const msg = chats.addMessage({ chatId: p.id, author: 'user', text, parentId: body.parentId || null, attachments: body.attachments || [], meta: body.voice ? { voice: true } : {} });
   engine.onUserMessage(p.id, msg).catch((e) => console.error('run', e));
   return msg;
 });
@@ -229,6 +243,10 @@ route('PATCH', '/api/settings', async (req) => {
   if (b.local_execution && ['ask', 'always', 'never'].includes(b.local_execution)) setSetting('local_execution', b.local_execution);
   if (b.theme) setSetting('theme', b.theme);
   if (b.user_name != null) setSetting('user_name', String(b.user_name).trim().slice(0, 60));
+  if (b.usage_guard != null) setSetting('usage_guard', b.usage_guard ? '1' : '0');
+  if (b.usage_guard_at != null) setSetting('usage_guard_at', String(Math.min(Math.max(Number(b.usage_guard_at) || 0.9, 0.5), 1)));
+  if (b.routine_model && ['balanced', 'economy'].includes(b.routine_model)) setSetting('routine_model', b.routine_model);
+  if (b.onboarded != null) setSetting('onboarded', b.onboarded ? '1' : '0');
   emit('settings');
   return publicSettings();
 });
@@ -240,7 +258,25 @@ route('POST', '/api/memory/import', async (req) => {
   if (!primary) throw new Error('Create a primary Bot first');
   return { imported: memory.importMemory(primary.id, text), bot: primary.name };
 });
+route('GET', '/api/activity', (req, res, p, q) => {
+  const day = q.get('day'); // YYYY-MM-DD in local time
+  let since = Number(q.get('since')) || undefined, until;
+  if (day) { const d = new Date(`${day}T00:00:00`); since = d.getTime(); until = since + 864e5; }
+  return { items: activity.list({ botId: q.get('bot') || undefined, since, until, kind: q.get('kind') || undefined, q: q.get('q') || undefined }), plan: activity.plan() };
+});
+// Setup checks for the first-run screen: Claude Code signed in, and a browser available.
+route('GET', '/api/health', async () => {
+  const { execFile } = await import('node:child_process');
+  const claude = await new Promise((resolve) => execFile(process.env.TANDEM_CLAUDE || 'claude', ['auth', 'status'], { timeout: 15000 }, (err, out) => {
+    if (err && !out) return resolve({ installed: false, loggedIn: false });
+    try { const j = JSON.parse(out); resolve({ installed: true, loggedIn: !!j.loggedIn, method: j.authMethod }); } catch { resolve({ installed: true, loggedIn: false }); }
+  }));
+  const chrome = ['/Applications/Google Chrome.app', '/Applications/Chromium.app', '/Applications/Microsoft Edge.app', '/Applications/Brave Browser.app'].some((p) => fs.existsSync(p)) || !!process.env.TANDEM_CHROME;
+  return { claude, chrome, node: process.versions.node };
+});
+route('GET', '/api/plan', () => ({ plan: activity.plan(), guard: activity.routinesShouldWait() }));
 route('GET', '/api/usage', () => ({
+  plan: activity.plan(),
   byBot: all(`SELECT b.name AS bot, u.model, count(*) AS turns, round(sum(u.cost), 4) AS cost, sum(u.input_tokens) AS input_tokens, sum(u.output_tokens) AS output_tokens
     FROM usage u LEFT JOIN bots b ON b.id = u.bot_id WHERE u.created > ? GROUP BY u.bot_id, u.model ORDER BY cost DESC`, now() - 7 * 864e5),
   week: get('SELECT count(*) AS turns, round(coalesce(sum(cost),0), 4) AS cost FROM usage WHERE created > ?', now() - 7 * 864e5),
@@ -385,6 +421,7 @@ server.keepAliveTimeout = 65000;
 
 // Computer ↔ Connect apps: re-check sign-ins every few minutes.
 setInterval(() => connectors.refresh().catch(() => {}), 3 * 60 * 1000);
+setInterval(() => activity.prune(), 6 * 3600 * 1000);
 computer.startIdleReaper((botId) => engine.activeRuns().some((r) => r.botId === botId));
 // Routine scheduler.
 routines.recomputeAll();

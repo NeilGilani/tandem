@@ -249,11 +249,101 @@ export async function renderSettings($main, r) {
     ];
   } else if (t === 'usage') {
     const u = await api('GET', '/api/usage');
+    const guardAt = h('select.select', { style: { width: 'auto' } }, [[0.8, '80%'], [0.9, '90%'], [0.95, '95%']].map(([v, l]) => h('option', { value: v, selected: Math.abs(st.usage_guard_at - v) < 0.001 }, l)));
+    guardAt.addEventListener('change', () => patch({ usage_guard_at: Number(guardAt.value) }));
+    const rm = h('select.select', { style: { width: 'auto' } }, [['balanced', 'Balanced (Sonnet)'], ['economy', 'Economy (Haiku)']].map(([v, l]) => h('option', { value: v, selected: st.routine_model === v }, l)));
+    rm.addEventListener('change', () => patch({ routine_model: rm.value }));
     content = [
-      h('p.hint', 'Every Bot reply, routine run and test run counts toward your Claude plan’s limits. Costs are what the API would have charged — informational on a subscription.'),
-      h('dl.kv', h('dt', 'Last 7 days'), h('dd', `${u.week.turns} turns · $${u.week.cost} equivalent`)),
-      h('div.list', { style: { marginTop: '12px' } }, u.byBot.map((x) => h('div.list-row', h('div.grow', x.bot || 'Deleted Bot', h('small', `${x.model} · ${x.turns} turns · ${Math.round((x.input_tokens + x.output_tokens) / 1000)}k tokens`)), h('span', `$${x.cost}`)))),
+      h('h2', 'Your Claude plan'),
+      h('p.hint', 'Bots run on your Claude Code plan, so every reply, routine and test counts toward its limits. These numbers come straight from Claude.'),
+      planBars(u.plan),
+      h('h2', 'Protect your plan'),
+      h('div.list',
+        h('div.list-row', h('div.grow', 'Pause routines when the plan is nearly used up', h('small', 'Scheduled routines are skipped, and you get one notification. Chats still work.')), sw(st.usage_guard, (v) => patch({ usage_guard: v }))),
+        h('div.list-row', h('div.grow', 'Pause routines at', h('small', 'Share of your weekly limit')), guardAt),
+        h('div.list-row', h('div.grow', 'Model for routines', h('small', 'Economy uses far less of your plan, but is less capable')), rm)),
+      h('h2', 'Last 7 days'),
+      h('dl.kv', h('dt', 'Bot turns'), h('dd', String(u.week.turns))),
+      h('div.list', { style: { marginTop: '12px' } }, u.byBot.map((x) => h('div.list-row', h('div.grow', x.bot || 'Deleted Bot', h('small', `${x.model}, ${x.turns} turns, ${Math.round((x.input_tokens + x.output_tokens) / 1000)}k tokens`))))),
     ];
   }
   page($main, 'Settings', null, tabs, ...[content].flat());
+}
+
+// ---------- Activity -------------------------------------------------------------------------
+let actBot = null, actKind = '', actDay = null, actQuery = '';
+const ACT_KINDS = [['', 'Everything'], ['tool', 'Actions'], ['approval', 'Approvals'], ['draft', 'Drafts'], ['handoff', 'Handoffs'], ['error', 'Problems']];
+const dayStr = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+export async function renderActivity($main) {
+  const today = new Date();
+  actDay ||= dayStr(today);
+  const params = new URLSearchParams({ day: actDay });
+  if (actBot) params.set('bot', actBot);
+  if (actKind && actKind !== 'tool') params.set('kind', actKind);
+  if (actQuery) params.set('q', actQuery);
+  const { items } = await api('GET', `/api/activity?${params}`);
+  const shown = actKind === 'tool' ? items.filter((i) => i.kind === 'tool') : items;
+
+  // Group each run's steps under the run.
+  const runs = new Map();
+  const blocks = [];
+  for (const it of [...shown].reverse()) {
+    if (it.kind === 'run') { const b = { run: it, steps: [] }; runs.set(it.run_id, b); blocks.push(b); continue; }
+    const b = it.run_id && runs.get(it.run_id);
+    if (b) b.steps.push(it); else blocks.push({ run: null, steps: [it] });
+  }
+  blocks.reverse();
+
+  const statusPillA = (st) => {
+    const map = { ok: ['Done', 'good'], running: ['Working', 'warn'], pending: ['Waiting for you', 'warn'], allowed: ['Allowed', 'good'], denied: ['Denied', 'bad'],
+      expired: ['Expired', ''], error: ['Failed', 'bad'], stopped: ['Stopped', ''], sent: ['Sent', 'good'], discarded: ['Discarded', ''] };
+    const [l, c] = map[st] || [st, ''];
+    return h(`span.pill${c ? '.' + c : ''}`, l);
+  };
+  const t = (ts) => new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const row = (it, nested) => {
+    const b = bot(it.bot_id);
+    const det = it.detail && h('details.cmd-details', h('summary', 'Details'), h('pre', it.detail));
+    return h('div.list-row', { style: { alignItems: 'flex-start', paddingLeft: nested ? '44px' : '14px' } },
+      nested ? null : (b ? avatar(b, 26) : h('span.initials', '?')),
+      h('div.grow', h('div', { style: { color: it.kind === 'error' ? 'var(--bad)' : 'var(--text)' } }, it.summary), det,
+        h('small', [t(it.created), nested ? null : b?.name, it.origin === 'routine' ? 'routine' : null].filter(Boolean).join(' · '))),
+      statusPillA(it.status),
+      it.chat_id && !nested && h('button.btn.ghost', { on: { click: () => go(`#/chat/${it.chat_id}`) } }, 'Open chat'));
+  };
+
+  const days = [0, 1, 2, 3, 4, 5, 6].map((n) => { const d = new Date(); d.setDate(d.getDate() - n); return d; });
+  const daySel = h('select.select', { style: { width: 'auto' } }, days.map((d, i) => h('option', { value: dayStr(d), selected: dayStr(d) === actDay }, i === 0 ? 'Today' : i === 1 ? 'Yesterday' : d.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' }))));
+  daySel.addEventListener('change', () => { actDay = daySel.value; renderActivity($main); });
+  const search = h('input.input', { placeholder: 'Search activity', value: actQuery, style: { maxWidth: '240px' }, on: { change: (e) => { actQuery = e.target.value.trim(); renderActivity($main); } } });
+  const botSel = h('select.select', { style: { width: 'auto' } }, h('option', { value: '' }, 'All Bots'), S.bots.map((b) => h('option', { value: b.id, selected: b.id === actBot }, b.name)));
+  botSel.addEventListener('change', () => { actBot = botSel.value || null; renderActivity($main); });
+
+  const counts = { done: items.filter((i) => i.kind === 'tool' && i.status === 'ok').length, denied: items.filter((i) => i.status === 'denied').length, errors: items.filter((i) => i.kind === 'error' || i.status === 'error').length };
+  page($main, 'Activity', 'Everything your Bots did: what they opened, ran, sent and changed, what they asked you about, and what went wrong.',
+    h('div.hstack', { style: { flexWrap: 'wrap', marginBottom: '12px' } }, daySel, botSel, search),
+    h('div.filter-row', ACT_KINDS.map(([k, l]) => h(`button.chip-btn${actKind === k ? '.on' : ''}`, { on: { click: () => { actKind = k; renderActivity($main); } } }, l))),
+    h('p.hint', `${counts.done} actions done${counts.denied ? `, ${counts.denied} denied` : ''}${counts.errors ? `, ${counts.errors} problems` : ''}.`),
+    blocks.length ? blocks.map((bl) => h('div.list', { style: { marginBottom: '10px' } },
+      bl.run ? row(bl.run, false) : null,
+      bl.run && bl.steps.length > 6
+        ? [bl.steps.slice(0, 3).map((x) => row(x, true)), h('details', h('summary.list-row', { style: { paddingLeft: '44px', cursor: 'pointer', color: 'var(--text-3)', fontSize: '12.5px' } }, `${bl.steps.length - 3} more steps`), bl.steps.slice(3).map((x) => row(x, true)))]
+        : bl.steps.map((x) => row(x, !!bl.run)))) : h('p.hint', 'Nothing yet for this day.'));
+}
+
+// ---------- Plan usage meter (used in Settings and the sidebar) ------------------------------
+export function planBars(plan, { compact = false } = {}) {
+  if (!plan || (!plan.fiveHour && !plan.week)) return compact ? null : h('p.hint', 'Usage shows up after your Bots’ next reply.');
+  const bar = (label, w) => {
+    if (!w) return null;
+    const pct = Math.round((w.used || 0) * 100);
+    const color = pct >= 90 ? 'var(--bad)' : pct >= 70 ? 'var(--warn)' : 'var(--good)';
+    const resets = w.resetsAt ? new Date(w.resetsAt).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' }) : '';
+    return h('div', { style: { display: 'grid', gap: '4px' } },
+      h('div.hstack', { style: { justifyContent: 'space-between', gap: '8px', fontSize: compact ? '11.5px' : '13px', whiteSpace: 'nowrap' } }, h('span', label), h('span.hint', { style: { fontSize: 'inherit', overflow: 'hidden', textOverflow: 'ellipsis' } }, `${pct}% used${resets ? ` · resets ${resets}` : ''}`)),
+      h('div', { style: { height: compact ? '4px' : '6px', borderRadius: '99px', background: 'var(--line)', overflow: 'hidden' } },
+        h('div', { style: { width: `${Math.min(pct, 100)}%`, height: '100%', background: color, borderRadius: '99px' } })));
+  };
+  return h('div', { style: { display: 'grid', gap: compact ? '6px' : '12px' } }, bar('5-hour limit', plan.fiveHour), bar('Weekly limit', plan.week));
 }

@@ -7,6 +7,8 @@ import { all, get, run, uid, now, timezone } from './db.js';
 import * as cron from './cron.js';
 import { quickJson } from './claude.js';
 import { emit } from './bus.js';
+import * as activity from './activity.js';
+import { setting } from './db.js';
 
 const MAX_PER_BOT = 50;
 const KEEP_RUNS = 20;
@@ -96,7 +98,7 @@ export function start(id, { test = false, payload = null } = {}) {
     (payload ? `\n\nWebhook payload:\n${JSON.stringify(payload, null, 2).slice(0, 8000)}` : '') +
     '\n\nThis is unattended background work. Use current data only; if a source is missing or stale, say so instead of reusing old data. ' +
     'Draft outgoing messages instead of sending them. Report partial completion explicitly.';
-  engine.runInDm(r.bot_id, text, { origin: 'routine', routineId: id })
+  engine.runInDm(r.bot_id, text, { origin: 'routine', routineId: id, model: setting('routine_model') === 'economy' ? 'haiku' : undefined })
     .then((res) => finish(runId, res?.error ? 'Failed' : 'Succeeded', res?.error || null))
     .catch((e) => finish(runId, 'Failed', e.message));
   return { ok: true, runId };
@@ -130,11 +132,25 @@ export function rotateSecret(id) {
 }
 
 // Scheduler tick.
+let guardNotified = 0;
 export function tick() {
   const due = all("SELECT * FROM routines WHERE trigger = 'schedule' AND paused = 0 AND next_run IS NOT NULL AND next_run <= ?", now());
+  if (!due.length) return;
+  const wait = activity.routinesShouldWait();
   for (const r of due) {
     run('UPDATE routines SET next_run = ? WHERE id = ?', cron.next(r.cron, timezone()), r.id);
+    if (wait) {
+      const runId = uid('run_');
+      run('INSERT INTO runs (id, routine_id, status, reason, started, ended) VALUES (?,?,?,?,?,?)', runId, r.id, 'Skipped', `${wait.reason}. Skipped to save your plan.`, now(), now());
+      trim(r.id);
+      emit('routines', { botId: r.bot_id });
+      continue;
+    }
     try { start(r.id); } catch (e) { console.error('routine', r.id, e.message); }
+  }
+  if (wait && now() - guardNotified > 6 * 3600e3) {
+    guardNotified = now();
+    emit('notify', { title: 'Routines paused', body: `${wait.reason}. Scheduled routines are skipped until it resets.` });
   }
 }
 

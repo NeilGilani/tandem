@@ -14,6 +14,7 @@ import * as vault from './vault.js';
 import * as approvals from './approvals.js';
 import * as mac from './mac.js';
 import { CATALOG } from './catalog.js';
+import * as activity from './activity.js';
 
 let engine = null;
 export const attach = (e) => { engine = e; };
@@ -133,6 +134,7 @@ export function resolveCard(msgId, payload) {
       computer.endTakeover(msg.bot_id);
       return onTakeoverEnded(msg.bot_id).then(() => true);
     case 'draft': {
+      if (msg.meta?.actId) activity.finish(msg.meta.actId, payload.action === 'discard' ? 'discarded' : 'sent');
       if (payload.action === 'discard') return done('discarded');
       const draft = { ...card, ...(payload.edits || {}) };
       Object.assign(card, payload.edits || {});
@@ -271,7 +273,9 @@ export async function call(tool, args = {}, ctx) {
       return res.saved ? `Saved "${res.saved}" in the Vault. Use vault_fill_login on the sign-in page.` : res.expired ? 'The request expired.' : 'The user declined.';
     }
     case 'draft_message': {
-      postCard(ctx, { type: 'draft', app: args.app, to: args.to, cc: args.cc || '', subject: args.subject || '', body: args.body, thread: args.thread || '', title: `${args.app} draft` });
+      const dm = postCard(ctx, { type: 'draft', app: args.app, to: args.to, cc: args.cc || '', subject: args.subject || '', body: args.body, thread: args.thread || '', title: `${args.app} draft` });
+      const actId = activity.log({ runId: ctx.runId, botId: ctx.botId, chatId: dm.chat_id, kind: 'draft', tool: 'draft_message', summary: `${args.app} draft to ${args.to}${args.subject ? `: ${args.subject}` : ''}`, detail: args.body, status: 'pending', origin: ctx.origin });
+      chats.updateMessage(dm.id, { meta: { ...(dm.meta || {}), actId } });
       return 'The draft is shown to the user with Send and Discard. Do not send it yourself. If they press Send, you will be asked to send it.';
     }
     case 'ask_user': {

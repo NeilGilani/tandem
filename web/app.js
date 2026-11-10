@@ -3,7 +3,11 @@ import { api, h, md, avatar, groupAvatar, userAvatar, icon, toast, modal, confir
 import { S, on, refresh, bot, chat, dmOf, runsIn, go, parseRoute, toggleComputer, connectEvents, comp } from './store.js';
 import { renderComputer } from './computer.js';
 import { openBotDrawer } from './drawer.js';
-import { renderApps, renderSkills, renderSettings, renderTemplates } from './pages.js';
+import { renderApps, renderSkills, renderSettings, renderTemplates, renderActivity, planBars } from './pages.js';
+import { needsOnboarding, renderOnboarding } from './onboarding.js';
+import { startCall } from './voice.js';
+import { renderHome as renderHomePage, refreshHome } from './home.js';
+import { cheer } from './alive.js';
 
 const $sidebar = document.getElementById('sidebar');
 const $main = document.getElementById('main');
@@ -161,6 +165,9 @@ function renderSidebar() {
       ]) } }, icon('plus'))),
     h('label.sb-search', icon('search'), search, h('kbd', '⌘K')),
     h('div.sb-scroll',
+      h(`button.nav-row${S.route.name === 'home' ? '.active' : ''}`, { on: { click: () => go('#/home') } }, icon('home'), h('span', 'Home'),
+        S.pending.length ? h('span.badge', String(S.pending.length)) : null),
+      h(`button.nav-row${S.route.name === 'activity' ? '.active' : ''}`, { on: { click: () => go('#/activity') } }, icon('activity'), h('span', 'Activity')),
       S.bots.length === 0 && h('div.hint', { style: { padding: '8px 10px' } }, 'No Bots yet.'),
       o.primary.map(chatRow),
       o.pinned.length > 0 && [h('div.sb-label', 'Pinned'), o.pinned.map(chatRow)],
@@ -171,6 +178,7 @@ function renderSidebar() {
     h('div.sb-foot',
       h(`button.foot-row${S.route.name === 'apps' ? '.me' : ''}`, { on: { click: () => go('#/apps') } }, icon('apps'), 'Connect apps'),
       h(`button.foot-row${S.route.name === 'skills' ? '.me' : ''}`, { on: { click: () => go('#/skills') } }, icon('book'), 'Skills'),
+      (S.settings.plan?.week?.used >= 0.7 || S.settings.plan?.fiveHour?.used >= 0.8) && h('button.foot-row', { style: { display: 'block' }, title: 'Claude plan usage', on: { click: () => go('#/settings/usage') } }, planBars(S.settings.plan, { compact: true })),
       h('button.foot-row.me', { on: { click: (e) => menu(e.clientX, e.clientY - 150, [
         { label: 'Settings', onClick: () => go('#/settings') },
         { label: 'Bot templates', onClick: () => go('#/templates') },
@@ -288,7 +296,16 @@ function renderBotParts(m, isGroup, showWho) {
   return parts;
 }
 
+const seenMsgs = new Set();
+let animateNew = false;
 function messageRow(m, prev, isGroup, { inThread = false } = {}) {
+  const fresh = animateNew && !seenMsgs.has(m.id);
+  seenMsgs.add(m.id);
+  const el = messageRowInner(m, prev, isGroup, { inThread });
+  if (fresh) [el].flat().filter(Boolean).forEach((x) => x.classList?.add('enter'));
+  return el;
+}
+function messageRowInner(m, prev, isGroup, { inThread = false } = {}) {
   if (m.author === 'system') return sysLine(m);
   const me = m.author === 'user';
   const sameRun = prev && prev.author === m.author && prev.bot_id === m.bot_id && m.created - prev.created < 5 * 60e3;
@@ -443,6 +460,7 @@ function renderChat(chatId) {
     h('button.title', { title: 'Conversation details (⌘⇧I)', on: { click: () => isGroup ? newGroup(c) : openBotDrawer(b.id) } },
       isGroup ? groupAvatar(members, 24) : avatar(b, 24), h('span', isGroup ? c.name : b?.name)),
     h('div.spacer'),
+    !isGroup && h('button.icon-btn', { title: 'Start voice chat', on: { click: () => startCall(chatId) } }, icon('phone')),
     h('button.icon-btn', { title: 'Computer', on: { click: () => toggleComputer() } }, icon('monitor')),
     h('button.icon-btn', { title: 'More', on: { click: (e) => menu(e.clientX - 180, e.clientY + 12, [
       ...(!isGroup ? [{ label: 'View conversation details', onClick: () => openBotDrawer(b.id) }, { label: 'Routines', onClick: () => openBotDrawer(b.id, 'routines') }, { label: 'Library', onClick: () => openBotDrawer(b.id, 'library') }, { label: 'Teach a task', onClick: () => teachTask(b.id, chatId) }] : []),
@@ -457,7 +475,8 @@ function renderChat(chatId) {
   renderComposer();
   renderTeachBar();
   if (S.messages[chatId]) paintMessages();
-  loadMessages(chatId).then(() => { if (currentChatId === chatId) paintMessages(); });
+  animateNew = false;
+  loadMessages(chatId).then(() => { if (currentChatId === chatId) { paintMessages(); animateNew = true; } });
 }
 
 export function teachTask(botId, chatId) {
@@ -734,7 +753,7 @@ function renderComposer() {
     const r = e.currentTarget.getBoundingClientRect();
     menu(r.left, r.top - 130, [
       { label: 'Attach files', onClick: () => fileInput.click() },
-      ...(!isGroup ? [{ label: 'Teach a task', onClick: () => teachTask(c.bot_ids[0], currentChatId) }] : []),
+      ...(!isGroup ? [{ label: 'Start voice chat', onClick: () => startCall(currentChatId) }, { label: 'Teach a task', onClick: () => teachTask(c.bot_ids[0], currentChatId) }] : []),
       { label: 'Mention a Bot or app', onClick: () => { ta.value += (ta.value && !ta.value.endsWith(' ') ? ' ' : '') + '@'; ta.focus(); updateMention(); } },
     ]);
   } } }, icon('plus'));
@@ -753,8 +772,11 @@ function renderComposer() {
 }
 
 // ---------- Home ---------------------------------------------------------------------------------
+const homeDeps = () => ({ renderCard, planBars });
 function renderHome() {
   currentChatId = null;
+  if (needsOnboarding()) return renderOnboarding($main);
+  if (S.bots.length) return renderHomePage($main, homeDeps());
   if (!S.bots.length) {
     $main.replaceChildren(h('div.empty', h('div',
       avatar({ shape: 'circle', color: '#6d5dfc' }, 76, { blink: true }),
@@ -765,9 +787,6 @@ function renderHome() {
         h('button.btn', { on: { click: () => go('#/templates') } }, 'Bot templates')))));
     return;
   }
-  const first = flatOrder()[0];
-  if (first && innerWidth > 820) return go(`#/chat/${first.id}`);
-  $main.replaceChildren(h('div.empty', 'Choose a Bot'));
 }
 
 // ---------- Command palette & shortcuts --------------------------------------------------------
@@ -779,7 +798,9 @@ export function openPalette() {
     { label: 'Create a Bot', sub: '⌘N', run: newBot },
     { label: 'New group chat', sub: '⌘⇧N', run: () => newGroup() },
     { label: 'Connect apps', sub: '⌘⇧M', run: () => go('#/apps') },
+    { label: 'Home', run: () => go('#/home') },
     { label: 'Skills', run: () => go('#/skills') },
+    { label: 'Activity', run: () => go('#/activity') },
     { label: 'Bot templates', run: () => go('#/templates') },
     { label: 'Settings', sub: '⌘,', run: () => go('#/settings') },
     { label: 'Computer', run: () => toggleComputer() },
@@ -834,9 +855,10 @@ function render() {
   applyTheme();
   renderSidebar();
   const r = S.route;
-  $app.classList.toggle('in-chat', r.name !== 'home');
+  $app.classList.toggle('in-chat', !(r.name === 'home' && innerWidth <= 820));
   $app.classList.toggle('with-computer', S.showComputer);
   $app.classList.toggle('compact', compact);
+  if (needsOnboarding() && r.name !== 'settings') { currentChatId = null; $app.classList.add('in-chat'); renderOnboarding($main); renderComputer(); return; }
   if (r.name === 'chat') {
     if (currentChatId !== r.id || !$messages?.isConnected) renderChat(r.id);
     else paintMessages({ keepScroll: true });
@@ -846,12 +868,13 @@ function render() {
     else if (r.name === 'skills') renderSkills($main, r);
     else if (r.name === 'settings') renderSettings($main, r);
     else if (r.name === 'templates') renderTemplates($main, r);
+    else if (r.name === 'activity') renderActivity($main, r);
     else renderHome();
   }
   renderComputer();
 }
 
-on('state', render);
+on('state', () => { render(); nativeStatus(); });
 on('route', () => { replyTo = null; pendingFiles = []; render(); });
 on('message', (m) => {
   const c = chat(m.chat_id);
@@ -865,13 +888,42 @@ on('message', (m) => {
 });
 on('run', (r) => {
   if (r.chatId === currentChatId) { if (r.ended) paintMessages({ keepScroll: true }); else paintWorking(); }
+  if (r.ended) setTimeout(() => cheer(r.botId), 60);
   renderSidebar();
+  homeSoon(!!r.ended);
+  nativeStatus();
 });
+let homeTimer;
+let homeRefetch = false;
+function homeSoon(refetch = false) { homeRefetch ||= refetch; clearTimeout(homeTimer); homeTimer = setTimeout(() => { refreshHome(homeDeps(), { refetch: homeRefetch }); homeRefetch = false; }, 250); }
+on('message', () => { homeSoon(); nativeStatus(); });
+
+// ---------- Mac app bridge ---------------------------------------------------------------------
+const nativePost = (msg) => { try { window.webkit?.messageHandlers?.tandem?.postMessage(msg); } catch {} };
+function nativeStatus() {
+  if (!S.native) return;
+  nativePost({ type: 'status', pending: S.pending.length,
+    working: S.runs.map((r) => ({ name: bot(r.botId)?.name || 'Bot', status: r.status || 'Working', chatId: r.chatId })) });
+}
+if (S.native) {
+  document.documentElement.classList.add('native');
+  // Empty parts of the top bars drag the window; double-click zooms, like a title bar.
+  document.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    const bar = e.target.closest('.sb-top, .chat-head, .page-top, .home-top, .cp-head');
+    if (bar && !e.target.closest('button, input, textarea, select, a, [contenteditable]')) nativePost({ type: e.detail === 2 ? 'zoom' : 'drag' });
+  });
+}
+window.tandemNewBot = () => newBot();
+let actTimer;
+on('activity', () => { if (S.route.name !== 'activity') return; clearTimeout(actTimer); actTimer = setTimeout(() => renderActivity($main), 800); });
+on('usage', () => renderSidebar());
 on('computer-toggle', () => { $app.classList.toggle('with-computer', S.showComputer); renderComputer(); });
 on('computer', () => { renderComputer(); renderTeachBar(); if (currentChatId) paintWorking(); });
 on('notify', (n) => {
   const b = bot(n.botId);
   if (b && !b.notify) return;
+  if (S.native) return nativePost({ type: 'notify', title: n.title || 'Tandem', body: n.body || '', chatId: n.chatId || null });
   if (document.hasFocus() && n.chatId === currentChatId) return;
   if ('Notification' in window && Notification.permission === 'granted') {
     const note = new Notification(n.title || 'Tandem', { body: n.body, icon: '/icon.svg', tag: n.chatId });
