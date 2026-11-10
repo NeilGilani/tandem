@@ -8,6 +8,7 @@ import { needsOnboarding, renderOnboarding } from './onboarding.js';
 import { startCall } from './voice.js';
 import { renderHome as renderHomePage, refreshHome } from './home.js';
 import { cheer } from './alive.js';
+import { openQuickAsk } from './quickask.js';
 
 const $sidebar = document.getElementById('sidebar');
 const $main = document.getElementById('main');
@@ -283,6 +284,16 @@ function sysLine(m) {
   return h(`div.sys${m.meta?.error ? '.error' : ''}`, m.text);
 }
 
+function isLatestBot(m) {
+  const list = S.messages[m.chat_id] || [];
+  for (let i = list.length - 1; i >= 0; i--) { if (list[i].author === 'user') return false; if (list[i].id === m.id) return !runsIn(m.chat_id).length; }
+  return false;
+}
+async function sendQuick(chatId, text) {
+  optimisticRun(chatId);
+  try { await api('POST', `/api/chats/${chatId}/messages`, { text }); } catch (e) { toast(e.message, 'bad'); }
+}
+
 function renderBotParts(m, isGroup, showWho) {
   const b = bot(m.bot_id);
   const parts = [];
@@ -292,6 +303,7 @@ function renderBotParts(m, isGroup, showWho) {
   if (m.meta?.handoff && m.author === 'bot') parts.push(h('div.who', `From ${b?.name || 'a Bot'}`));
   if (m.text) parts.push(h('div.bubble', { html: md(m.text) }));
   if (m.card) parts.push(renderCard(m));
+  if (m.meta?.suggestions?.length && isLatestBot(m)) parts.push(h('div.suggest', m.meta.suggestions.map((t) => h('button.sug', { on: { click: () => sendQuick(m.chat_id, t) } }, t))));
   if (Object.keys(m.reactions || {}).length) parts.push(h('div.reactions', Object.keys(m.reactions).map((e) => h('button', { on: { click: () => api('POST', `/api/messages/${m.id}/react`, { emoji: e }) } }, e))));
   return parts;
 }
@@ -349,22 +361,40 @@ function renderMessages(chatId) {
   return out.flat();
 }
 
-// Live "working" rows, one per running Bot, with a live Computer card when it uses the browser.
+// Live turns: one per running Bot. A trail of steps ticking from spinner to check (with
+// timings), the live Computer card when it uses the browser, and the answer as it's written.
+const openTrails = new Set();
 function workingRows(chatId) {
   const runs = runsIn(chatId);
   const out = [];
   for (const r of runs) {
     const b = bot(r.botId);
+    const trail = (r.trail || []).filter((x) => x.k === 'tool');
+    const total = r.trailTotal || trail.length;
+    const showAll = openTrails.has(r.id);
+    const visible = showAll ? trail : trail.slice(-4);
+    const hiddenCount = total - visible.length;
+    const head = h('div.live-head', avatar(b, 24, { busy: true }),
+      h('span.st.shimmer', r.optimistic ? 'Reading your message' : (r.status || 'Thinking')),
+      h('span.el', dur(Date.now() - r.started)),
+      h('button.btn.ghost.sm', { on: { click: () => api('POST', `/api/chats/${chatId}/stop`) } }, 'Stop'));
+    const steps = visible.length ? h('ol.trail',
+      hiddenCount > 0 && h('li.more', h('button', { on: { click: () => { openTrails.add(r.id); paintWorking(); } } }, `${hiddenCount} earlier step${hiddenCount === 1 ? '' : 's'}`)),
+      visible.map((x) => h(`li.${x.s === 'ok' ? 'ok' : x.s === 'err' ? 'err' : 'run'}`,
+        h('span.ic', x.s === 'ok' ? icon('check') : x.s === 'err' ? icon('x') : h('span.mini-spin')),
+        h('span.lbl', x.t),
+        x.ms != null ? h('span.ms', x.ms < 1000 ? `${x.ms}ms` : `${(x.ms / 1000).toFixed(1)}s`) : null))) : null;
+    const turn = h('div.live-turn', head, steps);
+    out.push(turn);
     if (r.browser) {
       const cs = comp(r.botId);
       const ctl = cs.control === 'user';
-      out.push(h('div.row.gap', h('div.col', computerCard({
+      out.push(h('div.row', h('div.col', computerCard({
         botId: r.botId, state: ctl ? 'control' : 'working', live: true,
         text: ctl ? (cs.takeover?.reason || 'You have control') : r.status,
       }))));
     }
-    out.push(h('div.working', avatar(b, 22, { blink: true }), h('span.st.shimmer', r.status || 'Thinking'), h('span.el', dur(Date.now() - r.started)),
-      h('button.btn.ghost', { style: { height: '24px', fontSize: '12px', padding: '0 8px' }, on: { click: () => api('POST', `/api/chats/${chatId}/stop`) } }, 'Stop')));
+    if (r.live && r.live.trim()) out.push(h('div.row', h('div.col', h('div.bubble.streaming', { html: md(r.live) + '<span class="caret"></span>' }))));
   }
   return out;
 }
@@ -385,6 +415,17 @@ function computerCard({ botId, state, shot, text, live = false }) {
         ? [h('button.btn.primary', { on: { click: () => api('POST', '/api/computer/done', body) } }, "I'm done"), h('button.btn', { on: { click: () => api('POST', '/api/computer/focus', body) } }, 'Show window')]
         : [h('button.btn.primary', { on: { click: () => api('POST', '/api/computer/takeover', { ...body, reason: 'You took over', focus: true }) } }, 'Take over'),
           h('button.btn', { on: { click: () => { S.focusBot = botId; toggleComputer(true); } } }, state === 'working' ? 'Watch' : 'Open computer')]));
+}
+
+// The moment you hit send, the Bot visibly picks it up (replaced by the real run).
+export function optimisticRun(chatId) {
+  const c = chat(chatId);
+  if (!c || c.kind !== 'dm' || runsIn(chatId).length) return;
+  const fake = { id: `opt_${Date.now()}`, botId: c.bot_ids[0], chatId, started: Date.now(), status: 'Reading your message', optimistic: true, trail: [] };
+  S.runs.push(fake);
+  paintWorking();
+  setTimeout(() => { const i = S.runs.indexOf(fake); if (i >= 0) { S.runs.splice(i, 1); paintWorking(); renderSidebar(); } }, 12000);
+  renderSidebar();
 }
 
 // Poll each live computer card's screen while its Bot is working here.
@@ -468,13 +509,14 @@ function renderChat(chatId) {
       ...(isGroup ? [{ label: 'Edit members', onClick: () => newGroup(c) }, { label: 'Delete group', danger: true, onClick: async () => { if (await confirm(`Delete "${c.name}"?`)) { await api('DELETE', `/api/chats/${c.id}`); go('#/'); } } }] : []),
     ]) } }, icon('more')));
 
-  $messages = h('div.messages');
+  $messages = h('div.messages', { on: { scroll: () => $main.classList.toggle('scrolled', $messages.scrollTop > 4) } });
   $teach = h('div.teach-bar', { hidden: true });
   $composer = h('div.composer');
   $main.replaceChildren(head, $messages, $teach, $composer);
   renderComposer();
   renderTeachBar();
   if (S.messages[chatId]) paintMessages();
+  else $messages.replaceChildren(h('div.msg-wrap', h('div.skel', h('div'), h('div'), h('div'))));
   animateNew = false;
   loadMessages(chatId).then(() => { if (currentChatId === chatId) { paintMessages(); animateNew = true; } });
 }
@@ -663,11 +705,26 @@ function mentionCandidates(c, q) {
   return out.slice(0, 10);
 }
 
+// Slash commands in the message box.
+const SLASH = [
+  { name: 'routine', hint: 'Do something on a schedule', arg: 'what and when', wrap: (a) => `Set up a routine: ${a}` },
+  { name: 'remember', hint: 'Save a fact or rule', arg: 'what to remember', wrap: (a) => `Remember this: ${a}` },
+  { name: 'draft', hint: 'Draft something for your review', arg: 'what to draft', wrap: (a) => `Draft this for my review, and don't send it: ${a}` },
+  { name: 'research', hint: 'Research with sources', arg: 'the question', wrap: (a) => `Research this thoroughly, cite your sources, and give me a short summary: ${a}` },
+  { name: 'skill', hint: 'Use a saved skill', arg: 'skill name', wrap: (a) => `Use your skill "${a}" now.` },
+  { name: 'handoff', hint: 'Ask another Bot to do it', arg: 'Bot name and task', wrap: (a) => `Hand this to another Bot with message_bot and tell me when it's done: ${a}` },
+  { name: 'teach', hint: 'Show it how to do a task', run: (c) => teachTask(c.bot_ids[0], c.id) },
+  { name: 'voice', hint: 'Start a voice chat', run: (c) => startCall(c.id) },
+  { name: 'computer', hint: 'Show its computer', run: () => toggleComputer(true) },
+  { name: 'stop', hint: 'Stop what it is doing', run: (c) => api('POST', `/api/chats/${c.id}/stop`) },
+  { name: 'reset', hint: 'Start a fresh conversation', run: async (c) => { if (await confirm('Reset this conversation? Memory, files, routines and settings are kept.', { danger: false, label: 'Reset' })) api('POST', `/api/chats/${c.id}/reset`); } },
+];
+
 function renderComposer() {
   if (!$composer || !currentChatId) return;
   const c = chat(currentChatId);
   const isGroup = c?.kind === 'group';
-  const ta = h('textarea', { rows: 1, placeholder: isGroup ? `Message ${c.name}` : `Message ${bot(c?.bot_ids[0])?.name || ''}` });
+  const ta = h('textarea', { rows: 1, placeholder: isGroup ? `Message ${c.name}` : `Message ${bot(c?.bot_ids[0])?.name || ''}, or type / for commands` });
   const draftKey = `tandem.draft.${currentChatId}`;
   try { ta.value = localStorage.getItem(draftKey) || ''; } catch {}
   const pop = h('div.mention-pop', { hidden: true });
@@ -683,18 +740,31 @@ function renderComposer() {
   }
   action.addEventListener('click', () => (ta.value.trim() || pendingFiles.length ? send() : dictate()));
   async function send() {
-    const text = ta.value.trim();
+    let text = ta.value.trim();
     if (!text && !pendingFiles.length) return;
+    const sm = text.match(/^\/(\w+)\s*([\s\S]*)$/);
+    const cmd = sm && SLASH.find((x) => x.name === sm[1].toLowerCase());
+    if (cmd?.run) { ta.value = ''; paintAction(); return cmd.run(c); }
+    if (cmd?.wrap) { if (!sm[2].trim()) return toast(`Add ${cmd.arg} after /${cmd.name}`, 'bad'); text = cmd.wrap(sm[2].trim()); }
     const body = { text, parentId: replyTo?.id || null, attachments: pendingFiles };
     ta.value = ''; pendingFiles = []; replyTo = null;
     try { localStorage.removeItem(draftKey); } catch {}
     if (recognizer) recognizer.stop();
     renderComposer();
+    optimisticRun(currentChatId);
     try { await api('POST', `/api/chats/${currentChatId}/messages`, body); } catch (e) { toast(e.message, 'bad'); }
   }
   $composer._send = send;
   $composer._dictate = () => dictate();
   function updateMention() {
+    const sm = ta.value.match(/^\/(\w*)$/);
+    if (sm) {
+      const items = SLASH.filter((x) => x.name.startsWith(sm[1].toLowerCase()) && (!x.run || !isGroup || x.name === 'stop' || x.name === 'reset' || x.name === 'computer'))
+        .map((x) => ({ label: `/${x.name}`, sub: x.hint, slash: x }));
+      if (!items.length) { pop.hidden = true; mentionState = null; return; }
+      mentionState = { start: 0, items, sel: 0, slash: true };
+      return drawPop();
+    }
     const before = ta.value.slice(0, ta.selectionStart);
     const m = before.match(/(^|\s)@([\w.\- ]{0,24})$/);
     if (!m) { pop.hidden = true; mentionState = null; return; }
@@ -705,10 +775,17 @@ function renderComposer() {
   }
   function drawPop() {
     pop.hidden = false;
-    pop.replaceChildren(...mentionState.items.map((it, i) => h(`button${i === mentionState.sel ? '.sel' : ''}`, { on: { mousedown: (e) => { e.preventDefault(); pick(i); } } }, it.av || '@', it.label, h('small', it.sub))));
+    pop.replaceChildren(...mentionState.items.map((it, i) => it.slash
+      ? h(`button.cmd${i === mentionState.sel ? '.sel' : ''}`, { on: { mousedown: (e) => { e.preventDefault(); pick(i); } } }, h('b', it.label), h('small', it.slash.arg ? `${it.sub} · ${it.slash.arg}` : it.sub))
+      : h(`button${i === mentionState.sel ? '.sel' : ''}`, { on: { mousedown: (e) => { e.preventDefault(); pick(i); } } }, it.av || '@', it.label, h('small', it.sub))));
   }
   function pick(i) {
     const it = mentionState.items[i];
+    if (it.slash) {
+      pop.hidden = true; mentionState = null;
+      if (it.slash.run) { ta.value = ''; try { localStorage.removeItem(draftKey); } catch {} paintAction(); return it.slash.run(c); }
+      ta.value = `/${it.slash.name} `; ta.focus(); paintAction(); return;
+    }
     const v = ta.value;
     ta.value = v.slice(0, mentionState.start) + it.insert + v.slice(ta.selectionStart);
     pop.hidden = true; mentionState = null; ta.focus(); paintAction();
@@ -795,6 +872,7 @@ export function openPalette() {
   const res = h('div.palette-res');
   let items = [], sel = 0;
   const commands = [
+    { label: 'Quick Ask', sub: '⌘J', run: () => openQuickAsk({ onSent: optimisticRun }) },
     { label: 'Create a Bot', sub: '⌘N', run: newBot },
     { label: 'New group chat', sub: '⌘⇧N', run: () => newGroup() },
     { label: 'Connect apps', sub: '⌘⇧M', run: () => go('#/apps') },
@@ -841,7 +919,7 @@ export function openPalette() {
 }
 
 const SHORTCUTS = [
-  ['Search', '⌘K'], ['Search Bots', '⌘⇧F'], ['New Bot', '⌘N'], ['New group chat', '⌘⇧N'], ['Keyboard shortcuts', '⌘/'],
+  ['Quick Ask (any Bot, anywhere)', '⌘J  ·  ⌥Space on your Mac'], ['Search', '⌘K'], ['Search Bots', '⌘⇧F'], ['New Bot', '⌘N'], ['New group chat', '⌘⇧N'], ['Keyboard shortcuts', '⌘/'],
   ['Compact sidebar', '⌘B'], ['Focus the message box', '⌘I'], ['Add selected text to chat', '⌘L'], ['Go to Bot 1 to 9', '⌘1 … ⌘9'],
   ['Previous or next Bot', '⌥↑ / ⌥↓'], ['Cycle Bots', '⌃Tab / ⌃⇧Tab'], ['Back or forward', '⌘[ / ⌘]'], ['Connect apps', '⌘⇧M'],
   ['Conversation details', '⌘⇧I'], ['Send', 'Enter or ⌘Enter'], ['New line', '⇧Enter'], ['Dictate', '⌘D'], ['Stop the Bot', '⌘.'], ['Settings', '⌘,'],
@@ -952,6 +1030,7 @@ document.addEventListener('keydown', (e) => {
   const mod = e.metaKey || e.ctrlKey;
   const k = e.key.toLowerCase();
   if (mod && !e.shiftKey && k === 'k') { e.preventDefault(); openPalette(); }
+  else if (mod && !e.shiftKey && k === 'j') { e.preventDefault(); openQuickAsk({ onSent: optimisticRun }); }
   else if (mod && e.shiftKey && k === 'f') { e.preventDefault(); if (compact) toggleCompact(); document.getElementById('sb-q')?.focus(); }
   else if (mod && e.shiftKey && k === 'n') { e.preventDefault(); newGroup(); }
   else if (mod && !e.shiftKey && k === 'n') { e.preventDefault(); newBot(); }

@@ -80,7 +80,7 @@ export function connectEvents() {
   });
   es.addEventListener('run', (e) => {
     const r = JSON.parse(e.data);
-    S.runs = S.runs.filter((x) => !(x.chatId === r.chatId && x.botId === r.botId));
+    S.runs = S.runs.filter((x) => !(x.chatId === r.chatId && x.botId === r.botId) && !(x.optimistic && x.chatId === r.chatId));
     if (!r.ended) S.runs.push(r);
     fire('run', r);
   });

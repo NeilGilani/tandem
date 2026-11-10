@@ -57,6 +57,7 @@ function mcpConfig(runCtx) {
   return file;
 }
 
+const HIDDEN_TOOLS = new Set(['ToolSearch', 'TodoWrite', 'TodoRead', 'ExitPlanMode', 'mcp__tandem__approval_prompt']);
 const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u; } };
 const BROWSER_STATUS = {
   snapshot: 'Reading the page', take_screenshot: 'Looking at the screen', wait_for: 'Waiting for the page', tabs: 'Switching tabs',
@@ -129,7 +130,7 @@ function start(botId, chatId, text, opts) {
   if (!bot || !chat) return Promise.resolve({ error: 'Bot or chat not found' });
   const id = uid('run_');
   const model = opts.model || pickModel(text, { origin: opts.origin, attachments: (opts.attachments || []).length });
-  const runCtx = { id, botId, chatId, origin: opts.origin, model, status: 'Thinking', started: now(), messageId: null, text: '', opts, steps: [], tail: [], toolActs: new Map() };
+  const runCtx = { id, botId, chatId, origin: opts.origin, model, status: 'Thinking', started: now(), messageId: null, text: '', opts, steps: [], tail: [], toolActs: new Map(), trail: [], live: '' };
   const key = `${chatId}:${botId}`;
 
   let fullText = text;
@@ -145,7 +146,7 @@ function start(botId, chatId, text, opts) {
   const mcpFile = mcpConfig(runCtx);
   const args = [
     '-p', fullText,
-    '--output-format', 'stream-json', '--verbose',
+    '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
     '--model', model,
     '--append-system-prompt', prompt.build(bot, chat, { origin: opts.origin }),
     '--mcp-config', mcpFile, '--strict-mcp-config',
@@ -220,7 +221,21 @@ function start(botId, chatId, text, opts) {
 
   function setStatus(s) { runCtx.status = s; emit('run', publicRun(runCtx)); }
 
+  // Live view: the text being written right now, and a trail of steps with timings.
+  let pushTimer = null;
+  function pushLive() {
+    if (pushTimer) return;
+    pushTimer = setTimeout(() => { pushTimer = null; emit('run', publicRun(runCtx)); }, 70);
+  }
   function handleEvent(evt) {
+    if (evt.type === 'stream_event') {
+      const e = evt.event || {};
+      if (evt.parent_tool_use_id) return; // a sub-agent's stream; the trail covers it
+      if (e.type === 'content_block_start' && e.content_block?.type === 'text') { runCtx.live = ''; pushLive(); }
+      else if (e.type === 'content_block_delta' && e.delta?.type === 'text_delta') { runCtx.live += e.delta.text; pushLive(); }
+      else if (e.type === 'content_block_start' && e.content_block?.type === 'thinking') { runCtx.status = 'Thinking'; pushLive(); }
+      return;
+    }
     if (evt.type === 'system' && evt.subtype === 'init' && evt.session_id) {
       chats.setSession(chatId, botId, evt.session_id);
     } else if (evt.type === 'assistant') {
@@ -231,11 +246,16 @@ function start(botId, chatId, text, opts) {
           runCtx.tail.push(t);
           setStatus(t.split('\n')[0].slice(0, 120));
         } else if (block.type === 'tool_use') {
+          // Claude Code's own housekeeping isn't work the user cares to see.
+          if (HIDDEN_TOOLS.has(block.name)) { setStatus('Getting ready'); continue; }
           if (block.name.startsWith('mcp__playwright__')) { runCtx.browser = true; snapshotSoon(); }
           const label = toolStatus(block.name, block.input || {});
           runCtx.steps.push({ k: 'tool', t: label });
           runCtx.tail = [];
           setStatus(label);
+          if (runCtx.live.trim()) { runCtx.trail.push({ k: 'note', t: runCtx.live.trim().slice(0, 400) }); }
+          runCtx.live = '';
+          runCtx.trail.push({ id: block.id, k: 'tool', t: label, s: 'run', at: now() });
           if (block.name !== 'mcp__tandem__approval_prompt') {
             const detail = block.name === 'Bash' ? block.input?.command : block.input?.url || block.input?.element || null;
             runCtx.toolActs.set(block.id, activity.log({ runId: id, botId, chatId, kind: 'tool', tool: block.name, summary: label, detail, status: 'running', origin: opts.origin }));
@@ -245,6 +265,8 @@ function start(botId, chatId, text, opts) {
     } else if (evt.type === 'user') {
       for (const block of evt.message?.content || []) {
         if (block.type !== 'tool_result') continue;
+        const step = runCtx.trail.find((x) => x.id === block.tool_use_id);
+        if (step) { step.s = block.is_error ? 'err' : 'ok'; step.ms = now() - step.at; pushLive(); }
         const actId = runCtx.toolActs.get(block.tool_use_id);
         if (!actId) continue;
         const txt = Array.isArray(block.content) ? block.content.map((c) => c.text || '').join(' ') : String(block.content || '');
@@ -272,6 +294,7 @@ function start(botId, chatId, text, opts) {
     const m = chats.addMessage({ chatId, author: 'bot', botId, text: t, parentId: opts.parentId || null,
       meta: { runId: id, model, origin: opts.origin, steps, duration: now() - runCtx.started, browser: !!runCtx.browser, shot } });
     runCtx.messageId = m.id;
+    if ((opts.origin === 'chat' || opts.origin === 'system') && chat.kind === 'dm' && !/^\[Voice call\]/.test(text)) suggestNext(m, text, t);
   }
 
   child.on('close', (code) => {
@@ -329,6 +352,21 @@ function start(botId, chatId, text, opts) {
   }
 }
 
+// Two or three tappable next steps under a Bot's answer (one small, cheap call).
+async function suggestNext(msg, asked, answered) {
+  try {
+    const j = await quickJson(
+      `The user asked their AI coworker: "${String(asked).replace(/^\[[^\]]*\]\s*/, '').slice(0, 600)}"\n\nIt replied: "${answered.slice(0, 1800)}"\n\n` +
+      'Suggest 3 short follow-up requests the user would most likely send next, written as the user (imperative, max 7 words each, no punctuation at the end). ' +
+      'Prefer concrete next actions (draft it, put it in a sheet, make it a weekly routine, send it, dig deeper on X). Reply JSON only: {"s":["…","…","…"]}',
+      { system: 'You write crisp follow-up suggestions for a chat UI.', timeoutMs: 30000 });
+    const list = (j.s || []).map((x) => String(x).trim()).filter((x) => x && x.length < 70).slice(0, 3);
+    if (!list.length) return;
+    const cur = chats.getMessage(msg.id);
+    if (cur) chats.updateMessage(msg.id, { meta: { ...(cur.meta || {}), suggestions: list } });
+  } catch {}
+}
+
 // Pick an interrupted task back up in the same session.
 function resume(botId, chatId, opts, why) {
   if (!chats.getBot(botId) || !chats.getChat(chatId)) return;
@@ -353,7 +391,9 @@ export function stopChat(chatId) {
   for (const r of active.values()) if (r.chatId === chatId) stop(r.id);
 }
 
-const publicRun = (r) => ({ id: r.id, botId: r.botId, chatId: r.chatId, status: r.status, model: r.model, origin: r.origin, started: r.started, steps: r.steps?.length || 0, browser: !!r.browser });
+const publicRun = (r) => ({ id: r.id, botId: r.botId, chatId: r.chatId, status: r.status, model: r.model, origin: r.origin, started: r.started,
+  steps: r.steps?.length || 0, browser: !!r.browser, live: (r.live || '').slice(-4000),
+  trail: (r.trail || []).slice(-14).map(({ k, t, s, ms }) => ({ k, t, s, ms })), trailTotal: (r.trail || []).filter((x) => x.k === 'tool').length });
 export const activeRuns = () => [...active.values()].map(publicRun);
 
 // ---- Entry points -------------------------------------------------------------------

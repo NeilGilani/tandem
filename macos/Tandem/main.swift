@@ -5,6 +5,7 @@ import AppKit
 import WebKit
 import UserNotifications
 import ServiceManagement
+import Carbon.HIToolbox
 
 let ENV = ProcessInfo.processInfo.environment
 let PORT = Int(ENV["TANDEM_PORT"] ?? "") ?? 4747
@@ -255,6 +256,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         menu.delegate = self
         status.menu = menu
 
+        registerQuickAskHotKey()
         UNUserNotificationCenter.current().delegate = self
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
     }
@@ -317,6 +319,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             let i = NSMenuItem(title: "\(pending) waiting for you", action: #selector(openHome), keyEquivalent: ""); i.target = self; menu.addItem(i)
         }
         menu.addItem(.separator())
+        let qa = NSMenuItem(title: "Quick Ask", action: #selector(quickAsk), keyEquivalent: " ")
+        qa.keyEquivalentModifierMask = [.option]; qa.target = self; menu.addItem(qa)
         menu.addItem(withTitle: "New Bot", action: #selector(newBot), keyEquivalent: "").target = self
         let login = NSMenuItem(title: "Open at Login", action: #selector(toggleLogin), keyEquivalent: "")
         login.target = self
@@ -373,6 +377,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         NSApp.windowsMenu = win
     }
     @objc func openSettings() { show(hash: "#/settings") }
+
+    // ⌥Space anywhere on the Mac opens Quick Ask. Carbon hot keys need no extra permission.
+    var hotKeyRef: EventHotKeyRef?
+    func registerQuickAskHotKey() {
+        var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+        InstallEventHandler(GetApplicationEventTarget(), { _, _, _ -> OSStatus in
+            DispatchQueue.main.async { (NSApp.delegate as? AppDelegate)?.quickAsk() }
+            return noErr
+        }, 1, &spec, nil, nil)
+        let id = EventHotKeyID(signature: OSType(0x54444D51), id: 1) // 'TDMQ'
+        let status = RegisterEventHotKey(UInt32(kVK_Space), UInt32(optionKey), id, GetApplicationEventTarget(), 0, &hotKeyRef)
+        if status != noErr { NSLog("Quick Ask hot key ⌥Space is taken by another app") }
+    }
+    @objc func quickAsk() {
+        show()
+        wc.run("window.tandemQuickAsk && window.tandemQuickAsk()")
+    }
     @objc func reload() { wc.load() }
 
     // Two linked rings, drawn as a template image so it fits light and dark menu bars.

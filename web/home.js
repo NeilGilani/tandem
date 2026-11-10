@@ -81,7 +81,9 @@ function paint($main, renderCard, planBars) {
       const img = h('img', { alt: '', 'data-live': r.botId, hidden: true });
       return h('button.live', { on: { click: () => go(`#/chat/${r.chatId}`) } },
         live ? h('div.live-shot', img, h('div.live-dim')) : h('div.live-shot.blank', avatar(b, 54, { busy: true })),
-        h('div.live-b', avatar(b, 26, { busy: true }), h('div.t', h('b', b.name), h('span.shimmer', r.status || 'Working')), h('span.hint', dur(Date.now() - r.started))));
+        h('div.live-b', avatar(b, 26, { busy: true }), h('div.t', h('b', b.name), h('span.shimmer', r.status || 'Working')), h('span.hint', dur(Date.now() - r.started))),
+        (r.trail || []).filter((x) => x.k === 'tool').length ? h('ol.trail.mini', (r.trail || []).filter((x) => x.k === 'tool').slice(-3).map((x) => h(`li.${x.s === 'ok' ? 'ok' : x.s === 'err' ? 'err' : 'run'}`,
+          h('span.ic', x.s === 'ok' ? icon('check') : x.s === 'err' ? icon('x') : h('span.mini-spin')), h('span.lbl', x.t)))) : null);
     }))
     : h('div.calm', h('div.calm-ic', icon('sparkle')), h('div', h('b', 'All quiet'), h('div.hint', 'When a Bot starts working, you can watch it here.')));
 
