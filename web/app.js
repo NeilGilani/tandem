@@ -1,5 +1,5 @@
 // Tandem web app: sidebar, conversations, cards, composer, palette, shortcuts.
-import { api, h, md, avatar, groupAvatar, userAvatar, icon, toast, modal, confirm, menu, time, fileUrl, SHAPES, COLORS, logo, esc } from './lib.js';
+import { api, h, md, avatar, groupAvatar, userAvatar, icon, toast, modal, confirm, menu, time, fileUrl, SHAPES, COLORS, logo, esc, loadLogos } from './lib.js';
 import { S, on, refresh, bot, chat, dmOf, runsIn, go, parseRoute, toggleComputer, connectEvents, comp } from './store.js';
 import { renderComputer } from './computer.js';
 import { openBotDrawer } from './drawer.js';
@@ -1091,6 +1091,6 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').cat
 if ('Notification' in window && Notification.permission === 'default') {
   document.addEventListener('click', () => Notification.requestPermission(), { once: true });
 }
-await refresh().catch((e) => toast(`Can't reach Tandem: ${e.message}`, 'bad'));
+await Promise.all([refresh().catch((e) => toast(`Can't reach Tandem: ${e.message}`, 'bad')), loadLogos()]);
 connectEvents();
 parseRoute();

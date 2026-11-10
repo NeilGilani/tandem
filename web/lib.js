@@ -124,8 +124,19 @@ export function userAvatar(size = 28, name = '') {
   return h('span.initials', { style: { width: `${size}px`, height: `${size}px` } }, initials);
 }
 
-export const logo = (app, size = 32) => h('span.logo', { style: { background: app.color || '#64748b', width: `${size}px`, height: `${size}px`, fontSize: `${Math.round(size * .42)}px` } },
-  (app.name || '?').replace(/^(Google|Microsoft|Meta)\s/, '')[0]);
+// Real app logos (bundled in /logos, see scripts/fetch-logos.mjs), with a letter tile as fallback.
+export const LOGOS = {};
+export async function loadLogos() {
+  try { Object.assign(LOGOS, await (await fetch('/logos/index.json')).json()); } catch {}
+}
+export const logo = (app, size = 32) => {
+  const key = app.catalog_id && app.catalog_id !== 'custom' ? app.catalog_id : app.id;
+  const src = LOGOS[key] || LOGOS[app.id];
+  if (src) return h('span.logo.real', { style: { width: `${size}px`, height: `${size}px`, borderRadius: `${Math.round(size * 0.26)}px` } },
+    h('img', { src, alt: '', loading: 'lazy', draggable: false }));
+  return h('span.logo', { style: { background: app.color || '#64748b', width: `${size}px`, height: `${size}px`, fontSize: `${Math.round(size * .42)}px` } },
+    (app.name || '?').replace(/^(Google|Microsoft|Meta)\s/, '')[0]);
+};
 
 // ---- Icons (inline, stroke) ----------------------------------------------------------
 const I = {
