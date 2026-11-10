@@ -360,7 +360,10 @@ export async function call(tool, args = {}, ctx) {
       if (!app) return `"${args.app}" isn't in the catalog. The user can add any MCP server as a custom app under Connect apps.`;
       const row = connectors.add(app.id);
       let c = connectors.installed(ctx.botId).find((x) => x.id === row.id);
-      if (c.status === 'Connected') return `${app.name} is connected.`;
+      if (c.status === 'Connected') {
+        if (c.kind !== 'browser' || await accounts.verify(ctx.botId, app.id)) return `${app.name} is connected.`;
+        connectors.setStatus(ctx.botId, c.id, 'Needs auth'); // the cookies are there but the site signed it out
+      }
       // Someone on the team already signed in: use that instead of asking the user.
       if (c.kind === 'browser' && await accounts.borrow(ctx.botId, app.id).catch(() => false)) {
         c = connectors.installed(ctx.botId).find((x) => x.id === row.id);

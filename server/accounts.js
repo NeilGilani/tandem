@@ -80,14 +80,31 @@ export async function share(sourceBot, appId) {
   return n;
 }
 
-// A Bot needs an app: use the team's sign-in if there is one. True if it's connected now.
+// Really signed in? Open the app the way the Bot would and see whether it lands on a login page.
+// (Cookies alone can lie: a site may refuse a sign-in that moved to another browser.)
+const LOGIN = /accounts\.google\.com|login\.microsoftonline\.com|login\.live\.com|\/(log-?in|sign-?in|signin|auth|sso|session\/new|ServiceLogin)\b/i;
+export async function verify(botId, appId) {
+  const app = byId[appId];
+  if (!app?.url) return true;
+  try {
+    const r = await computer.siteFetch(botId, { url: app.url, timeoutMs: 20000 });
+    return r.status < 400 && !LOGIN.test(r.url || '');
+  } catch (e) {
+    return !/sent the browser to|Sign in to it/i.test(e.message) ? true : false;
+  }
+}
+
+// A Bot needs an app: use the team's sign-in if there is one. True if it's really signed in now.
 export async function borrow(botId, appId) {
   const acct = forApp(appId);
   if (!acct || !allowed(acct, botId)) return false;
   await computer.ensureBrowser(botId);
   if (!(await apply(botId, acct.key).catch(() => false))) return false;
   if (refreshFn) await refreshFn(botId).catch(() => {});
-  return true;
+  if (await verify(botId, appId)) return true;
+  run('UPDATE accounts SET updated = 0 WHERE key = ?', acct.key); // the saved sign-in no longer works
+  emit('connectors');
+  return false;
 }
 
 export function setShared(key, shared) {

@@ -48,7 +48,9 @@ export async function renderApps($main) {
     return h('div.team-acct',
       first ? logo(first) : h('span.logo'),
       h('div.grow', h('b', a.label), h('small', `${names.slice(0, 3).join(', ')}${names.length > 3 ? ` and ${names.length - 3} more` : ''}`),
-        h('small', `Signed in${a.source ? ` on ${a.source}'s ${S.settings.computer_mode === 'laptop' ? 'laptop' : 'computer'}` : ''} · kept fresh, ${ago(a.updated)}`)),
+        a.updated ? h('small', `Signed in${a.source ? ` on ${a.source}'s ${S.settings.computer_mode === 'laptop' ? 'laptop' : 'computer'}` : ''} · kept fresh, ${ago(a.updated)}`)
+          : h('small.stale', `${first?.name || a.label} signed this out. Sign in again once on any Bot's laptop and everyone gets it.`)),
+      !a.updated && h('span.pill.bad', 'Sign in again'),
       h('button.btn.sm', { title: 'Choose which Bots use this sign-in', on: { click: pickWho } }, icon('users'), who),
       h('button.btn.ghost.sm', { title: 'Stop sharing this sign-in. Bots that already have it stay signed in until it expires.', on: { click: async () => {
         if (!await confirm(`Stop sharing ${a.label}? Bots that already have it stay signed in until it expires.`, { label: 'Stop sharing' })) return;

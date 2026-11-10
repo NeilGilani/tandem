@@ -29,6 +29,11 @@ function sh(cmd, args, { timeout = 120000, input } = {}) {
   });
 }
 export const docker = (args, opts) => sh(BIN('docker'), args, opts);
+// Docker as you use it yourself (your default context, not the laptops VM).
+const plain = (cmd, args) => new Promise((resolve, reject) => {
+  const { DOCKER_HOST, ...env } = process.env;
+  execFile(cmd, args, { timeout: 15000, env }, (err, out) => (err ? reject(err) : resolve(out)));
+});
 const text = async (args, opts) => String(await docker(args, opts)).trim();
 
 // The VM and the image. Called at startup and before a laptop starts.
@@ -51,8 +56,11 @@ export function prepare() {
       }
       if (!up) {
         setState('starting', 'Starting the laptops VM');
+        // Colima makes its VM your default Docker context; put yours back afterwards.
+        const before = String(await plain(BIN('docker'), ['context', 'show']).catch(() => '')).trim();
         await sh(BIN('colima'), ['start', PROFILE, '--vm-type', 'vz', '--mount-type', 'virtiofs', '--cpu', '4', '--memory', '5', '--disk', '40',
           ...want.flatMap((f) => ['--mount', `${f}:w`]), '--runtime', 'docker'], { timeout: 600000 });
+        if (before && before !== `colima-${PROFILE}`) await plain(BIN('docker'), ['context', 'use', before]).catch(() => {});
       }
       const has = await text(['images', '-q', IMAGE]).catch(() => '');
       if (!has) {
@@ -99,7 +107,7 @@ export async function ensure(botId, { workspace, ports }) {
   const uid = process.getuid?.() ?? 501, gid = process.getgid?.() ?? 20;
   await docker(['run', '-d', '--name', name, '--label', `tandem.bot=${botId}`, '--hostname', 'laptop',
     '--user', `${uid}:${gid}`, '-e', `HOME=${workspace}`, '-e', `TZ=${timezone()}`, '-w', workspace,
-    '--memory', '900m', '--memory-swap', '1500m', '--shm-size', '256m', '--restart', 'no',
+    '--memory', '1100m', '--memory-swap', '1700m', '--shm-size', '256m', '--restart', 'no',
     ...folders(workspace).flatMap((f) => ['-v', `${f}:${f}`]),
     '-p', `127.0.0.1:${ports.cdp}:9223`, '-p', `127.0.0.1:${ports.screen}:6080`, IMAGE]);
   return true;
