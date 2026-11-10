@@ -34,7 +34,8 @@ function schedule() {
   clearTimeout(timer);
   if (!S.showComputer) return;
   const fast = comp(shownBot).control === 'user' || S.runs.some((r) => r.botId === shownBot);
-  timer = setTimeout(async () => { await poll(); schedule(); }, fast ? 700 : 2000);
+  const liveView = !!$el.querySelector('.cp-vnc');
+  timer = setTimeout(async () => { await poll(); schedule(); }, liveView ? 4000 : fast ? 700 : 2000);
 }
 
 function toPage(e) {
@@ -63,9 +64,13 @@ export function renderComputer() {
   const body = { botId: shownBot };
   const send = (ev) => api('POST', '/api/computer/input', { ...body, ...ev }).then(poll);
 
-  img = h('img', { alt: '', draggable: false, hidden: offline });
-  const screen = h(`div.cp-screen${control ? '.control' : ''}`, img, offline && h('div.cp-off', h('div', `${b.name}'s computer is asleep.`, h('br'),
+  // A laptop's screen streams live (on this Mac); elsewhere, screenshots refresh.
+  const live = c.laptop && c.screen && /^(127\.0\.0\.1|localhost)$/.test(location.hostname);
+  img = h('img', { alt: '', draggable: false, hidden: offline || live });
+  const vnc = live && !offline && h('iframe.cp-vnc', { title: `${b.name}'s laptop screen`, src: `http://127.0.0.1:${c.screen}/vnc.html?autoconnect=1&resize=scale&reconnect=1&reconnect_delay=800&show_dot=${control ? 1 : 0}&view_only=${control ? 0 : 1}` });
+  const screen = h(`div.cp-screen${control ? '.control' : ''}${live ? '.live' : ''}`, vnc, img, offline && h('div.cp-off', h('div', `${b.name}'s ${c.laptop ? 'laptop' : 'computer'} is asleep.`, h('br'),
     h('button.btn', { style: { marginTop: '10px', background: '#fff', color: '#111' }, on: { click: () => api('POST', '/api/computer/start', body).then(poll) } }, 'Wake it up'))));
+  if (vnc && control) setTimeout(() => vnc.focus(), 300);
   if (control) {
     img.addEventListener('click', (e) => { const p = toPage(e); if (p) send({ type: 'click', ...p }); });
     img.addEventListener('wheel', (e) => { e.preventDefault(); const p = toPage(e); if (p) api('POST', '/api/computer/input', { ...body, type: 'scroll', ...p, dy: e.deltaY }); }, { passive: false });
@@ -82,21 +87,22 @@ export function renderComputer() {
     on: { click: (e) => {
       const r = e.currentTarget.getBoundingClientRect();
       menu(r.left, r.bottom + 4, S.bots.map((x) => ({ label: `${x.name}${S.runs.some((q) => q.botId === x.id) ? ' (working)' : ''}`, onClick: () => { S.focusBot = x.id; shownBot = null; renderComputer(); } })));
-    } } }, avatar(b, 20), `${b.name}'s computer`);
+    } } }, avatar(b, 20), `${b.name}'s ${c.laptop ? 'laptop' : 'computer'}`);
 
   $el.replaceChildren(...[
     h('div.cp-head', switcher, h('span', { style: { flex: 1 } }),
-      h('button.icon-btn', { title: 'Show the window on this Mac', on: { click: () => api('POST', '/api/computer/focus', body) } }, icon('open')),
+      c.laptop ? (live && h('a.icon-btn', { title: 'Open the screen in its own window', href: `http://127.0.0.1:${c.screen}/vnc.html?autoconnect=1&resize=scale&reconnect=1&view_only=${control ? 0 : 1}`, target: '_blank' }, icon('open')))
+        : h('button.icon-btn', { title: 'Show the window on this Mac', on: { click: () => api('POST', '/api/computer/focus', body) } }, icon('open')),
       h('button.icon-btn', { title: 'Close', on: { click: () => toggleComputer(false) } }, icon('x'))),
     screen,
     h('div.cp-url', meta.url || ' '),
     h('div.cp-activity', control ? `You're in control. ${b.name} waits until you press I'm done.` : (working ? (working.status || 'Working') : (c.activity || 'Idle'))),
     control && !c.teach && h('div.cp-banner',
       h('div', c.takeover?.reason || 'You took control.'),
-      h('div.hint', 'Do just that step. Click and scroll on the screen above and type below, or use the window on your Mac.'),
+      h('div.hint', live ? 'You have the mouse and keyboard on the screen above. Do just that step, then press I\'m done.' : 'Do just that step. Click and scroll on the screen above and type below, or use the window on your Mac.'),
       h('div.hstack', h('button.btn.primary', { on: { click: () => api('POST', '/api/computer/done', body) } }, "I'm done"))),
-    control && h('div.cp-type', h('button.icon-btn', { title: 'Back', on: { click: () => send({ type: 'back' }) } }, icon('back')), urlBox),
-    control && h('div.cp-type', typeBox),
+    control && !live && h('div.cp-type', h('button.icon-btn', { title: 'Back', on: { click: () => send({ type: 'back' }) } }, icon('back')), urlBox),
+    control && !live && h('div.cp-type', typeBox),
     c.teach && h('div.cp-teach',
       h('div', h('span.rec'), ' ', h('b', 'Watching and learning')),
       h('div', c.teach.goal),
@@ -104,8 +110,8 @@ export function renderComputer() {
       h('div.hstack', h('button.btn.primary', { on: { click: () => api('POST', '/api/computer/teach/stop', body).then(() => toast('Drafting a skill from what you showed it')) } }, 'Stop'))),
     !control && h('div.cp-actions',
       h('button.btn', { on: { click: () => api('POST', '/api/computer/takeover', { ...body, reason: 'You took control' }) } }, icon('hand'), 'Take control'),
-      h('button.btn', { on: { click: () => api('POST', '/api/computer/takeover', { ...body, reason: 'You took over in the window', focus: true }) } }, icon('open'), 'Take over'),
-      h('button.btn.ghost', { title: 'Restart this computer’s browser', on: { click: () => api('POST', '/api/computer/restart', body).then(() => toast('Restarted')).then(poll) } }, icon('refresh'))),
+      !c.laptop && h('button.btn', { on: { click: () => api('POST', '/api/computer/takeover', { ...body, reason: 'You took over in the window', focus: true }) } }, icon('open'), 'Take over'),
+      h('button.btn.ghost', { title: c.laptop ? 'Restart this laptop' : 'Restart this computer’s browser', on: { click: () => api('POST', '/api/computer/restart', body).then(() => toast('Restarted')).then(poll) } }, icon('refresh'))),
     h('div.cp-files', `Files: ${c.workspace || ''}`),
   ].filter(Boolean));
   poll();

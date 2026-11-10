@@ -17,6 +17,8 @@ import { CATALOG } from './catalog.js';
 import * as activity from './activity.js';
 import * as missions from './missions.js';
 import * as squads from './squads.js';
+import * as laptop from './laptop.js';
+import * as accounts from './accounts.js';
 
 let engine = null;
 export const attach = (e) => { engine = e; };
@@ -68,6 +70,9 @@ export const DEFS = [
   ['mission_checkpoint', 'End a mission work session. Record what you did and decide what happens next: continue right away, wait until a time, blocked on the user, or done.',
     S({ note: str('What you did this session and where you left off (your future self reads this)'), next: { type: 'string', enum: ['continue', 'wait', 'blocked', 'done'] },
       wait_until: str('ISO date-time to wake up, when next="wait"'), wait_reason: str('What you will do when you wake up'), blocked_reason: str('What you need from the user, when next="blocked"'), summary: str('Final summary of results, when next="done"') }, ['note', 'next'])],
+  ['desktop_screenshot', "See your laptop's whole screen (1280 by 800): the desktop, every open window and app, not just the browser page. Use it before clicking on the desktop.", S({})],
+  ['desktop', "Use your laptop's desktop with the mouse and keyboard, for desktop apps (LibreOffice spreadsheets, documents and slides, the file manager, the terminal window). For websites, use the browser tools instead. Returns a fresh screenshot. action: click, double_click, move, drag (to x2,y2), scroll (amount, negative is up), type (text), key (keys like ctrl+s or Return), open (app: browser, terminal, files, spreadsheet, document, slides, editor, optionally a file path).",
+    S({ action: { type: 'string', enum: ['click', 'double_click', 'move', 'drag', 'scroll', 'type', 'key', 'open'] }, x: num('Screen x'), y: num('Screen y'), x2: num(''), y2: num(''), amount: num(''), text: str(''), keys: str('xdotool key names, space separated'), app: str(''), file: str('Absolute path to open with the app'), button: str('left or right') }, ['action'])],
   ['start_squad', 'Split a big job into independent parts that helper Bots do at the same time, each on its own computer (a copy of yours, with your sign-ins). Use it when the work divides cleanly and each part takes real effort: research many companies, find leads in several places, check many sites, draft many personal emails. Not for quick tasks or steps that depend on each other. Returns right away: end your turn with one short line, and you will be woken with every part\'s result to check, merge and deliver.',
     S({ goal: str('The overall outcome, in the user\'s terms'), parts: { type: 'array', description: '2 to 8 self-contained parts', items: S({ title: str('Short name for the part'), task: str('Exactly what to do and what to produce, so a helper can do it alone') }, ['title', 'task']) },
       merge: str('How the parts should be combined at the end, e.g. "one sheet with all leads" (optional)') }, ['goal', 'parts'])],
@@ -248,6 +253,14 @@ export async function call(tool, args = {}, ctx) {
 
   switch (tool) {
     case 'site_fetch': return siteFetch(args, ctx);
+    case 'desktop_screenshot':
+    case 'desktop': {
+      if (!computer.onLaptop(ctx.botId)) return 'Desktop tools need a laptop. This Bot is using a browser on the Mac; use the browser tools.';
+      await computer.ensureBrowser(ctx.botId);
+      if (tool === 'desktop') { await laptop.desktop(ctx.botId, args); await new Promise((r) => setTimeout(r, args.action === 'open' ? 2500 : 600)); }
+      const shot = await laptop.screenshot(ctx.botId, 55);
+      return { __image: shot.data, mime: shot.mime, text: tool === 'desktop' ? `Done: ${args.action}. This is the screen now.` : 'Your laptop screen.' };
+    }
     case 'start_squad': {
       const r = await squads.start({ leadId: ctx.botId, chatId: ctx.chatId, goal: args.goal, parts: args.parts, merge: args.merge });
       return `Squad started: ${r.parts} parts, ${r.parallel} at a time, writing to ${r.folder}. End your turn now with one short line to the user. You'll be woken with the results.`;
@@ -295,8 +308,13 @@ export async function call(tool, args = {}, ctx) {
       const app = findApp(args.app);
       if (!app) return `"${args.app}" isn't in the catalog. The user can add any MCP server as a custom app under Connect apps.`;
       const row = connectors.add(app.id);
-      const c = connectors.installed(ctx.botId).find((x) => x.id === row.id);
+      let c = connectors.installed(ctx.botId).find((x) => x.id === row.id);
       if (c.status === 'Connected') return `${app.name} is connected.`;
+      // Someone on the team already signed in: use that instead of asking the user.
+      if (c.kind === 'browser' && await accounts.borrow(ctx.botId, app.id).catch(() => false)) {
+        c = connectors.installed(ctx.botId).find((x) => x.id === row.id);
+        if (c.status === 'Connected') return `${app.name} is connected with the team's sign-in. Continue.`;
+      }
       const msg = postCard(ctx, { type: 'connect', connectorId: c.id, name: app.name, color: app.color, title: `Connect ${app.name}` }, '');
       const res = await waitCard(msg.id, ctx);
       return res.connected ? `${app.name} is connected. Continue.` : res.expired ? 'The Connect card expired.' : `The user didn't connect ${app.name}.`;

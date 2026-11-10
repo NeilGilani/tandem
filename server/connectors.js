@@ -8,6 +8,7 @@ import { all, get, run, now, uid, parseRow } from './db.js';
 import { CATALOG, byId } from './catalog.js';
 import * as computer from './computer.js';
 import { emit } from './bus.js';
+import * as accounts from './accounts.js';
 
 const rows = () => all('SELECT * FROM connectors ORDER BY added').map((r) => parseRow(r, ['config']));
 
@@ -109,7 +110,14 @@ export async function afterTakeover(botId) {
   await refresh(botId);
   const after = c && installed(botId).find((x) => x.id === id);
   if (after && after.status === 'Added') setStatus(botId, id, 'Needs auth');
+  // Signed in: save it for the company and give it to every other Bot.
+  if (after?.status === 'Connected' && after.kind === 'browser') {
+    const n = await accounts.share(botId, after.catalog_id).catch(() => 0);
+    emit('notify', { botId, title: `${after.name} is connected`, body: n ? `Shared with ${n} other Bot${n === 1 ? '' : 's'}, and every Bot gets it when its computer wakes.` : 'Every Bot gets this sign-in when its computer wakes.' });
+  }
 }
+
+export const isConnected = (botId, catalogId) => installed(botId).some((c) => c.catalog_id === catalogId && c.status === 'Connected');
 
 export const markConnected = (botId, id) => setStatus(botId, id, 'Connected');
 

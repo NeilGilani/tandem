@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { PATHS, uid, get, all, run } from './db.js';
 import { emit } from './bus.js';
+import * as laptop from './laptop.js';
 
 const BASE_PORT = Number(process.env.TANDEM_CDP_PORT || 9400);
 const IDLE_MS = 15 * 60 * 1000;
@@ -46,6 +47,9 @@ export function machine(botId) {
     dir,
     profile: path.join(dir, 'chrome-profile'),
     workspace: path.join(dir, 'workspace'),
+    // On a laptop the browser and screen are published on their own ports.
+    browserPort: null,
+    screenPort: null,
     pid: null,
     control: 'bot', // 'bot' | 'user'
     takeover: null,
@@ -55,12 +59,16 @@ export function machine(botId) {
     waiters: new Set(),
   };
   fs.mkdirSync(m.workspace, { recursive: true });
+  m.browserPort = laptop.enabled() ? m.port + 10000 : m.port;
+  m.screenPort = m.port + 20000;
   machines.set(botId, m);
   return m;
 }
 
 export const workspaceOf = (botId) => machine(botId).workspace;
-export const cdpUrl = (botId) => `http://127.0.0.1:${machine(botId).port}`;
+export const cdpUrl = (botId) => `http://127.0.0.1:${machine(botId).browserPort}`;
+export const onLaptop = (botId) => laptop.enabled() && machine(botId).browserPort !== machine(botId).port;
+export const screenUrl = (botId, { control = false } = {}) => `http://127.0.0.1:${machine(botId).screenPort}/vnc.html?autoconnect=1&resize=scale&reconnect=1&show_dot=1${control ? '' : '&view_only=1'}`;
 
 async function cdpUp(port) {
   try {
@@ -69,12 +77,22 @@ async function cdpUp(port) {
   } catch { return null; }
 }
 
-export async function isRunning(botId) { return !!(await cdpUp(machine(botId).port)); }
+export async function isRunning(botId) { return !!(await cdpUp(machine(botId).browserPort)); }
 
 export async function ensureBrowser(botId) {
   const m = machine(botId);
   m.lastUsed = Date.now();
-  if (await cdpUp(m.port)) return true;
+  if (await cdpUp(m.browserPort)) { if (onLaptop(botId)) m.pid = m.pid || 'laptop'; return true; }
+  if (onLaptop(botId)) {
+    m.activity = 'Opening its laptop';
+    emit('computer', status(botId));
+    await laptop.ensure(botId, { workspace: m.workspace, ports: { cdp: m.browserPort, screen: m.screenPort } });
+    for (let i = 0; i < 120; i++) {
+      if (await cdpUp(m.browserPort)) { m.pid = 'laptop'; m.activity = ''; await started(botId); emit('computer', status(botId)); return true; }
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    throw new Error('The laptop started but its browser did not come up.');
+  }
   const bin = CHROME_CANDIDATES.find((p) => fs.existsSync(p));
   if (!bin) throw new Error('No Chrome-family browser found. Set TANDEM_CHROME to its binary.');
   fs.mkdirSync(m.profile, { recursive: true });
@@ -92,6 +110,7 @@ export async function ensureBrowser(botId) {
   for (let i = 0; i < 40; i++) {
     await new Promise((r) => setTimeout(r, 250));
     if (await cdpUp(m.port)) {
+      await started(botId);
       setWindowState(botId, 'minimized').catch(() => {});
       emit('computer', status(botId));
       return true;
@@ -102,6 +121,7 @@ export async function ensureBrowser(botId) {
 
 export async function closeBrowser(botId) {
   const m = machine(botId);
+  if (onLaptop(botId)) { await laptop.stop(botId); m.pid = null; emit('computer', status(botId)); return; }
   if (!(await cdpUp(m.port))) return;
   await cdpBrowser(botId, 'Browser.close').catch(() => {});
   m.pid = null;
@@ -142,7 +162,7 @@ function cdpSession(wsUrl) {
 }
 
 async function cdpBrowser(botId, method, params) {
-  const v = await cdpUp(machine(botId).port);
+  const v = await cdpUp(machine(botId).browserPort);
   if (!v) throw new Error('This Bot’s computer isn’t running');
   const s = await cdpSession(v.webSocketDebuggerUrl);
   try { return await s.send(method, params); } finally { s.close(); }
@@ -157,7 +177,7 @@ export async function pages(botId) {
 
 async function withActivePage(botId, fn) {
   let list = await pages(botId);
-  if (!list.length && await cdpUp(machine(botId).port)) {
+  if (!list.length && await cdpUp(machine(botId).browserPort)) {
     await cdpBrowser(botId, 'Target.createTarget', { url: 'about:blank' }).catch(() => {});
     list = await pages(botId);
   }
@@ -186,7 +206,7 @@ async function cookieFetch(botId, { url, method = 'GET', headers = {}, body = nu
     const d = c.domain.replace(/^\./, '');
     return (u.hostname === d || u.hostname.endsWith(`.${d}`)) && u.pathname.startsWith(c.path || '/') && (!c.secure || u.protocol === 'https:');
   });
-  const ua = (await cdpUp(machine(botId).port))?.['User-Agent'];
+  const ua = (await cdpUp(machine(botId).browserPort))?.['User-Agent'];
   const r = await fetch(url, {
     method, redirect: 'follow', signal: AbortSignal.timeout(timeoutMs),
     headers: { ...(ua ? { 'User-Agent': ua } : {}), ...(jar.length ? { Cookie: jar.map((c) => `${c.name}=${c.value}`).join('; ') } : {}), Accept: '*/*', ...headers },
@@ -231,17 +251,20 @@ async function pageFetch(botId, { url, method = 'GET', headers = {}, body = null
 // leaving out caches. Skipped while the helper's own browser is running.
 export async function cloneProfile(fromBotId, toBotId) {
   const from = machine(fromBotId), to = machine(toBotId);
-  if (!fs.existsSync(from.profile) || await cdpUp(to.port)) return false;
-  fs.mkdirSync(to.profile, { recursive: true });
+  const src = onLaptop(fromBotId) ? path.join(from.workspace, '.chromium') : from.profile;
+  const dst = onLaptop(toBotId) ? path.join(to.workspace, '.chromium') : to.profile;
+  if (!fs.existsSync(src) || await cdpUp(to.browserPort)) return false;
+  fs.mkdirSync(dst, { recursive: true });
   const ex = ['Singleton*', 'DevToolsActivePort', 'Cache', 'Code Cache', 'GPUCache', 'ShaderCache', 'GrShaderCache', 'GraphiteDawnCache', 'DawnCache', 'Crashpad', 'CacheStorage', 'ScriptCache', 'component_crx_cache', 'optimization_guide_model_store'];
   await new Promise((resolve) => {
-    const c = spawn('rsync', ['-a', '--delete', ...ex.flatMap((e) => ['--exclude', e]), `${from.profile}/`, `${to.profile}/`], { stdio: 'ignore' });
+    const c = spawn('rsync', ['-a', '--delete', ...ex.flatMap((e) => ['--exclude', e]), `${src}/`, `${dst}/`], { stdio: 'ignore' });
     c.on('close', resolve); c.on('error', resolve);
   });
   return true;
 }
 
 async function setWindowState(botId, state) {
+  if (onLaptop(botId)) return; // a laptop's window lives on its own screen
   const list = await pages(botId);
   if (!list[0]) return;
   const { windowId } = await cdpBrowser(botId, 'Browser.getWindowForTarget', { targetId: list[0].id });
@@ -250,7 +273,15 @@ async function setWindowState(botId, state) {
 }
 
 export async function screenshot(botId, quality = 55) {
-  if (!(await cdpUp(machine(botId).port))) return null;
+  if (onLaptop(botId)) {
+    // The whole desktop, plus the page the browser is on.
+    if (!(await laptop.isRunning(botId))) return null;
+    const shot = await laptop.screenshot(botId, quality).catch(() => null);
+    if (!shot) return null;
+    const page = (await pages(botId)).find((p) => !p.url.startsWith('devtools://'));
+    return { data: shot.data, url: page?.url || '', title: page?.title || '', width: laptop.SCREEN.w, height: laptop.SCREEN.h };
+  }
+  if (!(await cdpUp(machine(botId).browserPort))) return null;
   return withActivePage(botId, async (s, page) => {
     const { data } = await s.send('Page.captureScreenshot', { format: 'jpeg', quality });
     const { cssVisualViewport: vp } = await s.send('Page.getLayoutMetrics');
@@ -260,6 +291,12 @@ export async function screenshot(botId, quality = 55) {
 
 // Remote control from the app (works from a phone too).
 export async function input(botId, ev) {
+  if (onLaptop(botId) && ['click', 'scroll', 'text', 'key'].includes(ev.type)) {
+    const a = ev.type === 'click' ? { action: 'click', x: ev.x, y: ev.y } : ev.type === 'scroll' ? { action: 'scroll', x: ev.x, y: ev.y, amount: Math.round((ev.dy || 0) / 100) || 1 }
+      : ev.type === 'text' ? { action: 'type', text: ev.text } : { action: 'key', keys: { Enter: 'Return', Backspace: 'BackSpace', Escape: 'Escape', ArrowLeft: 'Left', ArrowUp: 'Up', ArrowRight: 'Right', ArrowDown: 'Down', Tab: 'Tab' }[ev.key] || ev.key };
+    await laptop.desktop(botId, a);
+    return true;
+  }
   return withActivePage(botId, async (s) => {
     if (ev.type === 'click') {
       for (const type of ['mousePressed', 'mouseReleased']) {
@@ -301,6 +338,7 @@ export async function openUrl(botId, url) {
 // Show this Bot's browser window on the Mac (it normally stays minimized).
 export async function bringToFront(botId) {
   const m = machine(botId);
+  if (onLaptop(botId)) { emit('computer', { ...status(botId), focus: true }); return; } // the app opens its screen
   await setWindowState(botId, 'normal').catch(() => {});
   const script = m.pid
     ? `tell application "System Events" to set frontmost of (first process whose unix id is ${m.pid}) to true`
@@ -313,6 +351,43 @@ export async function bringToFront(botId) {
 export async function cookies(botId) {
   try { return (await cdpBrowser(botId, 'Storage.getCookies')).cookies || []; } catch { return []; }
 }
+
+// Cookies from a Bot's old browser on the Mac (for moving its sign-ins to its laptop).
+// Uses the running browser if there is one, otherwise opens the profile headless for a moment.
+export async function macCookies(botId) {
+  const m = machine(botId);
+  const read = async (port) => { const v = await cdpUp(port); if (!v) return null; const s = await cdpSession(v.webSocketDebuggerUrl); try { return (await s.send('Storage.getCookies')).cookies || []; } finally { s.close(); } };
+  const live = await read(m.port).catch(() => null);
+  if (live) return live;
+  const bin = CHROME_CANDIDATES.find((p) => fs.existsSync(p));
+  if (!bin || !fs.existsSync(m.profile)) return [];
+  const child = spawn(bin, ['--headless=new', `--remote-debugging-port=${m.port}`, `--user-data-dir=${m.profile}`, '--no-first-run', 'about:blank'], { stdio: 'ignore' });
+  try {
+    for (let i = 0; i < 40; i++) { await new Promise((r) => setTimeout(r, 250)); const got = await read(m.port).catch(() => null); if (got) return got; }
+    return [];
+  } finally { child.kill('SIGTERM'); }
+}
+
+// On laptops, the Bots' old Mac browsers aren't used any more.
+export async function closeMacBrowsers(botIds) {
+  for (const id of botIds) {
+    const m = machine(id);
+    if (m.browserPort === m.port) continue;
+    const v = await cdpUp(m.port);
+    if (!v) continue;
+    const s = await cdpSession(v.webSocketDebuggerUrl).catch(() => null);
+    if (s) { await s.send('Browser.close').catch(() => {}); s.close(); }
+  }
+}
+
+export async function setCookies(botId, list) {
+  if (list?.length) await cdpBrowser(botId, 'Storage.setCookies', { cookies: list });
+}
+
+// Called once each time a Bot's browser starts (company sign-ins go on here).
+const startHooks = [];
+export const onBrowserStart = (fn) => startHooks.push(fn);
+const started = async (botId) => { for (const fn of startHooks) await fn(botId).catch(() => {}); };
 
 export async function clearCookies(botId, domains) {
   const jar = await cookies(botId);
@@ -355,6 +430,8 @@ export function status(botId) {
     activity: m.activity,
     workspace: m.workspace,
     running: !!m.pid,
+    laptop: onLaptop(botId),
+    screen: onLaptop(botId) ? m.screenPort : null,
   };
 }
 export function statusAll() {

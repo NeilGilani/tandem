@@ -13,20 +13,52 @@ let appFilter = 'All', appQuery = '', appTab = 'apps', appBot = null;
 
 export async function renderApps($main) {
   if (appBot && !bot(appBot)) appBot = null;
-  const data = await api('GET', `/api/connectors${appBot ? `?bot=${encodeURIComponent(appBot)}` : ''}`);
+  const [data, accts] = await Promise.all([api('GET', `/api/connectors${appBot ? `?bot=${encodeURIComponent(appBot)}` : ''}`), api('GET', '/api/accounts').catch(() => [])]);
   appBot = data.bot;
+  const teamAcct = (appId) => accts.find((x) => x.apps.includes(appId));
   const forBot = bot(appBot);
   const botPicker = forBot ? h('button.btn', { on: { click: (e) => {
     const r = e.currentTarget.getBoundingClientRect();
     menu(r.left, r.bottom + 4, S.bots.map((x) => ({ label: x.name, onClick: () => { appBot = x.id; renderApps($main); } })));
-  } } }, avatar(forBot, 18), `For ${forBot.name}`) : null;
+  } } }, avatar(forBot, 18), `Sign in on ${forBot.name}'s ${S.settings.computer_mode === 'laptop' ? 'laptop' : 'computer'}`) : null;
   const signIn = async (id, name) => {
     await api('POST', `/api/connectors/${id}/signin`, { botId: appBot });
-    toast(`Sign in to ${name} in the window that opened, then press I'm done`);
+    toast(`Sign in to ${name} on the screen that opened, then press I'm done. Every Bot gets it.`);
     S.focusBot = appBot; toggleComputer(true);
   };
   const tabs = h('div.tabs', [['apps', 'Apps'], ['installed', `Connected (${data.installed.length})`], ['skills', 'Private skills'], ['custom', 'Custom app (MCP)']].map(([k, l]) =>
     h(`button${appTab === k ? '.on' : ''}`, { on: { click: () => { appTab = k; renderApps($main); } } }, l)));
+
+  // Accounts the whole team shares: sign in once, every Bot has it.
+  const ago = (t) => { const m = Math.round((Date.now() - t) / 60000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
+  const appName = (id) => data.catalog.find((c) => c.id === id)?.name || id;
+  const teamCard = (a) => {
+    const first = data.catalog.find((c) => c.id === a.apps[0]);
+    const names = a.apps.map(appName);
+    const who = a.shared === 'all' ? 'Every Bot' : `${a.shared.length} Bot${a.shared.length === 1 ? '' : 's'}`;
+    const pickWho = (e) => {
+      const r = e.currentTarget.getBoundingClientRect();
+      const cur = a.shared === 'all' ? S.bots.map((b) => b.id) : a.shared;
+      menu(r.left, r.bottom + 4, [{ label: 'Every Bot', onClick: () => api('PATCH', `/api/accounts/${encodeURIComponent(a.key)}`, { shared: 'all' }).then(() => renderApps($main)) },
+        ...S.bots.map((b) => ({ label: `${cur.includes(b.id) ? 'Shared with' : 'Not shared with'} ${b.name}`, onClick: () => {
+          const next = cur.includes(b.id) ? cur.filter((x) => x !== b.id) : [...cur, b.id];
+          api('PATCH', `/api/accounts/${encodeURIComponent(a.key)}`, { shared: next.length === S.bots.length ? 'all' : next }).then(() => renderApps($main));
+        } }))]);
+    };
+    return h('div.team-acct',
+      first ? logo(first) : h('span.logo'),
+      h('div.grow', h('b', a.label), h('small', `${names.slice(0, 3).join(', ')}${names.length > 3 ? ` and ${names.length - 3} more` : ''}`),
+        h('small', `Signed in${a.source ? ` on ${a.source}'s ${S.settings.computer_mode === 'laptop' ? 'laptop' : 'computer'}` : ''} · kept fresh, ${ago(a.updated)}`)),
+      h('button.btn.sm', { title: 'Choose which Bots use this sign-in', on: { click: pickWho } }, icon('users'), who),
+      h('button.btn.ghost.sm', { title: 'Stop sharing this sign-in. Bots that already have it stay signed in until it expires.', on: { click: async () => {
+        if (!await confirm(`Stop sharing ${a.label}? Bots that already have it stay signed in until it expires.`, { label: 'Stop sharing' })) return;
+        await api('DELETE', `/api/accounts/${encodeURIComponent(a.key)}`); renderApps($main);
+      } } }, 'Stop sharing'));
+  };
+  const teamBlock = h('div.team-block',
+    h('div.team-h', h('b', 'Your team\'s accounts'), h('span.hint', 'Sign in once and every Bot can use it. Sign-ins live in your Mac\'s Keychain; Bots never see your password.')),
+    accts.length ? h('div.team-list', accts.map(teamCard))
+      : h('p.hint', { style: { margin: '6px 0 0' } }, 'No shared sign-ins yet. Add an app below and sign in once.'));
 
   let content;
   if (appTab === 'apps') {
@@ -51,22 +83,24 @@ export async function renderApps($main) {
   } else {
     content = customAppForm(() => { appTab = 'installed'; renderApps($main); });
   }
-  page($main, 'Connect apps', 'Each Bot has its own computer, so you sign in to apps per Bot. Pick a Bot, then add and sign in to the apps it should use. Its sign-ins stay on its computer. Mac apps and custom MCP apps work for every Bot.',
+  page($main, 'Connect apps', 'Sign in to an app once and your whole team can use it. Mac apps and custom MCP apps work for every Bot.',
     h('div.hstack', { style: { marginBottom: '14px', flexWrap: 'wrap' } },
       botPicker,
       h('button.btn', { on: { click: () => api('POST', `/api/connectors/refresh?bot=${encodeURIComponent(appBot || '')}`).then(() => { toast('Checked sign-ins'); renderApps($main); }) } }, icon('refresh'), 'Check sign-ins'),
       h('button.btn', { on: { click: () => go('#/templates') } }, icon('template'), 'Bot templates'),
       h('button.btn', { on: { click: () => go('#/settings/vault') } }, icon('key'), 'Vault')),
-    tabs, content);
+    teamBlock, tabs, content);
 
   function appTile(a) {
     return h('div.tile',
-      h('div.tile-h', logo(a), h('div', { style: { flex: 1 } }, h('b', a.name), h('div.hint', a.category)), a.status && statusPill(a.status)),
+      h('div.tile-h', logo(a), h('div', { style: { flex: 1 } }, h('b', a.name), h('div.hint', a.category)), teamAcct(a.id) ? h('span.pill.good', 'Team') : a.status && statusPill(a.status)),
       h('p', a.tips),
-      h('div.hstack', a.installed_id ? actionsFor({ ...a, id: a.installed_id }, () => renderApps($main), signIn) :
+      h('div.hstack', teamAcct(a.id) && a.installed_id ? h('span.hint', 'Every Bot that needs it signs in with the team\'s account.') : a.installed_id ? actionsFor({ ...a, id: a.installed_id }, () => renderApps($main), signIn) :
         h('button.btn', { on: { click: async () => {
           const row = await api('POST', '/api/connectors', { catalogId: a.id });
-          if (a.kind === 'browser' && appBot) await signIn(row.id, a.name);
+          const team = teamAcct(a.id);
+          if (team) toast(`${a.name} added. Every Bot signs in with your team's ${team.label} account.`);
+          else if (a.kind === 'browser' && appBot) await signIn(row.id, a.name);
           else toast(`${a.name} connected. macOS asks for permission the first time a Bot uses it.`);
           renderApps($main);
         } } }, icon('plus'), 'Add')));

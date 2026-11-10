@@ -43,7 +43,7 @@ cp "$BUILD/Tandem" "$APP/Contents/MacOS/Tandem"
 cp "$BUILD/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 cp "$BUILD/node/bin/node" "$APP/Contents/Resources/node/bin/node"
 cp "$BUILD/node/LICENSE" "$APP/Contents/Resources/node/LICENSE"
-for d in server web mcp bin; do cp -R "$ROOT/$d" "$APP/Contents/Resources/tandem/$d"; done
+for d in server web mcp bin laptop; do cp -R "$ROOT/$d" "$APP/Contents/Resources/tandem/$d"; done
 cp "$ROOT/package.json" "$ROOT/package-lock.json" "$ROOT/LICENSE" "$APP/Contents/Resources/tandem/"
 (cd "$APP/Contents/Resources/tandem" && PATH="$BUILD/node/bin:$PATH" "$BUILD/node/bin/npm" ci --omit=dev --no-audit --no-fund --silent)
 

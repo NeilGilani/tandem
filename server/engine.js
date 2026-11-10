@@ -14,6 +14,8 @@ import * as prompt from './prompt.js';
 import * as approvals from './approvals.js';
 import * as connectors from './connectors.js';
 import * as computer from './computer.js';
+import * as laptop from './laptop.js';
+import os from 'node:os';
 import * as memory from './memory.js';
 import * as activity from './activity.js';
 
@@ -79,6 +81,8 @@ function toolStatus(name, input) {
     request_takeover: 'Waiting for you', vault_fill_login: 'Signing in', add_to_library: 'Saving to your Library', list_connectors: 'Checking connected apps' };
   const tn = name.replace(/^mcp__tandem__/, '');
   if (tn === 'site_fetch' && name.startsWith('mcp__tandem__')) return `Pulling data from ${host(input.url || '')}`;
+  if (tn === 'desktop_screenshot') return 'Looking at its screen';
+  if (tn === 'desktop') return { click: 'Clicking on its desktop', double_click: 'Opening something', type: 'Typing', key: 'Pressing keys', scroll: 'Scrolling', drag: 'Dragging', open: `Opening ${input.app || 'an app'}` }[input.action] || 'Using its laptop';
   if (name.startsWith('mcp__tandem__') && tandem[tn]) return tandem[tn];
   if (name === 'Bash' && input.description) return input.description.replace(/\.$/, '');
   if (name === 'Skill') return `Loading know-how${input.skill ? `: ${String(input.skill).replace(/[-_]/g, ' ')}` : ''}`;
@@ -147,7 +151,10 @@ function runArgs(bot, chat, runCtx, sessKey) {
   ];
   return { args, mcpFile, sid, newSid };
 }
-const CHILD_ENV = () => childEnv({ MCP_TOOL_TIMEOUT: String(6 * 3600 * 1000), MCP_TIMEOUT: '60000', BASH_DEFAULT_TIMEOUT_MS: '600000' });
+// On a laptop, a Bot's shell commands run there (see laptop/run-in-laptop.sh).
+const CHILD_ENV = (botId) => childEnv({ MCP_TOOL_TIMEOUT: String(6 * 3600 * 1000), MCP_TIMEOUT: '60000', BASH_DEFAULT_TIMEOUT_MS: '600000',
+  ...(botId && computer.onLaptop(botId) ? { CLAUDE_CODE_SHELL_PREFIX: laptop.shellPrefix(), TANDEM_LAPTOP: laptop.nameOf(botId), TANDEM_LAPTOP_HOME: computer.workspaceOf(botId),
+    TANDEM_DOCKER_HOST: process.env.TANDEM_DOCKER_HOST || `unix://${os.homedir()}/.colima/${laptop.PROFILE}/docker.sock` } : {}) });
 
 // ---- Instant start ------------------------------------------------------------------
 // While you type to a Bot, its browser wakes and a Claude Code session starts and waits
@@ -172,7 +179,7 @@ export function warm(chatId) {
   const entry = { id, model, sid, newSid, mcpFile, pre: [], child: null, timer: null };
   warmPool.set(key, entry);
   computer.ensureBrowser(botId).catch(() => {});
-  const child = spawn(CLAUDE_BIN, ['-p', '--input-format', 'stream-json', ...args], { cwd: computer.workspaceOf(botId), env: CHILD_ENV(), stdio: ['pipe', 'pipe', 'pipe'] });
+  const child = spawn(CLAUDE_BIN, ['-p', '--input-format', 'stream-json', ...args], { cwd: computer.workspaceOf(botId), env: CHILD_ENV(botId), stdio: ['pipe', 'pipe', 'pipe'] });
   entry.child = child;
   entry.onData = (d) => entry.pre.push(d);
   child.stdout.on('data', entry.onData);
@@ -248,7 +255,7 @@ function start(botId, chatId, text, opts) {
   return runCtx.done;
 
   function launch() {
-  const child = warmed ? warmed.child : spawn(CLAUDE_BIN, args, { cwd: computer.workspaceOf(botId), env: CHILD_ENV(), stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = warmed ? warmed.child : spawn(CLAUDE_BIN, args, { cwd: computer.workspaceOf(botId), env: CHILD_ENV(botId), stdio: ['ignore', 'pipe', 'pipe'] });
   runCtx.child = child;
 
   let buf = '', stderr = '', resultEvt = null;

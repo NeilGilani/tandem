@@ -20,6 +20,8 @@ import * as activity from './activity.js';
 import { CLAUDE_BIN, childEnv } from './claude.js';
 import * as toolbox from './toolbox.js';
 import * as squads from './squads.js';
+import * as laptop from './laptop.js';
+import * as accounts from './accounts.js';
 import * as missions from './missions.js';
 import { spawn as spawnProc } from 'node:child_process';
 import { CATEGORIES } from './catalog.js';
@@ -114,6 +116,9 @@ function publicSettings() {
   return {
     auto_review: setting('auto_review') === '1',
     toolbox: toolbox.status().state,
+    computer_mode: laptop.enabled() ? 'laptop' : 'mac',
+    laptops: laptop.status(),
+    laptop_folders: (() => { try { return JSON.parse(setting('laptop_folders') || '[]'); } catch { return []; } })(),
     timezone: setting('timezone'),
     resolved_timezone: timezone(),
     local_execution: setting('local_execution'),
@@ -205,6 +210,9 @@ route('POST', '/api/chats/:id/messages', async (req, res, p) => {
   engine.onUserMessage(p.id, msg).catch((e) => console.error('run', e));
   return msg;
 });
+route('GET', '/api/accounts', () => accounts.list().map((a) => ({ ...a, source: chats.getBot(a.source_bot)?.name || null })));
+route('PATCH', '/api/accounts/:key', async (req, res, p) => { const b = await readJson(req); accounts.setShared(decodeURIComponent(p.key), b.shared); return { ok: true }; });
+route('DELETE', '/api/accounts/:key', async (req, res, p) => { await accounts.forget(decodeURIComponent(p.key)); return { ok: true }; });
 route('POST', '/api/squads/:id/stop', (req, res, p) => ({ ok: squads.stop(p.id) }));
 route('POST', '/api/chats/:id/warm', (req, res, p) => ({ ok: engine.warm(p.id) }));
 route('POST', '/api/chats/:id/stop', (req, res, p) => { engine.stopChat(p.id); return { ok: true }; });
@@ -270,6 +278,8 @@ route('PATCH', '/api/settings', async (req) => {
   if (b.auto_review != null) setSetting('auto_review', b.auto_review ? '1' : '0');
   if (b.timezone) { setSetting('timezone', b.timezone); routines.recomputeAll(); }
   if (b.local_execution && ['smart', 'ask', 'always', 'never'].includes(b.local_execution)) setSetting('local_execution', b.local_execution);
+  if (b.computer_mode && ['laptop', 'mac'].includes(b.computer_mode)) setSetting('computer_mode', b.computer_mode);
+  if (Array.isArray(b.laptop_folders)) setSetting('laptop_folders', JSON.stringify(b.laptop_folders.map(String).filter((f) => path.isAbsolute(f)).slice(0, 20)));
   if (b.theme) setSetting('theme', b.theme);
   if (b.user_name != null) setSetting('user_name', String(b.user_name).trim().slice(0, 60));
   if (b.usage_guard != null) setSetting('usage_guard', b.usage_guard ? '1' : '0');
@@ -457,6 +467,18 @@ setInterval(() => activity.prune(), 6 * 3600 * 1000);
 missions.recover();
 toolbox.ensure(); // shared Python for Bots, built once in the background
 squads.recover();
+// Company sign-ins: every Bot's computer gets them when it wakes; keep them fresh.
+accounts.onRefresh((botId) => connectors.refresh(botId));
+computer.onBrowserStart((botId) => accounts.applyAll(botId));
+accounts.startKeepFresh(connectors.isConnected);
+// First start on laptops: sign-ins from the old Mac browsers come along (once).
+if (laptop.enabled() && !setting('accounts_imported')) {
+  const connected = all(`SELECT s.bot_id, c.catalog_id FROM connector_status s JOIN connectors c ON c.id = s.connector_id WHERE s.status = 'Connected'`);
+  accounts.importFromMac(connected).then((n) => { setSetting('accounts_imported', '1'); if (n) console.log(`moved ${n} sign-in(s) to company accounts`); })
+    .catch((e) => console.error('import sign-ins', e.message))
+    .finally(() => computer.closeMacBrowsers(all('SELECT id FROM bots').map((b) => b.id)));
+}
+if (laptop.enabled()) laptop.prepare(); // Bot laptops: start the VM, build the image once
 routines.recover();
 setInterval(() => missions.tick(), 15 * 1000);
 // Keep the Mac from idle-sleeping while Bots work or a mission wakes soon (the lid still sleeps it).

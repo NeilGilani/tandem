@@ -1,5 +1,5 @@
 // System prompt each Bot runs with (appended to Claude Code's own).
-import { PATHS, timezone } from './db.js';
+import { PATHS, timezone, setting } from './db.js';
 import * as computer from './computer.js';
 import * as missions from './missions.js';
 import * as chats from './chats.js';
@@ -7,6 +7,11 @@ import * as memory from './memory.js';
 import * as skills from './skills.js';
 import * as connectors from './connectors.js';
 import * as toolbox from './toolbox.js';
+
+const laptopFolders = (botId) => {
+  let extra = []; try { extra = JSON.parse(setting('laptop_folders') || '[]'); } catch {}
+  return [...new Set([PATHS.shared, PATHS.uploads, ...extra])];
+};
 
 export function build(bot, chat, { origin }) {
   const tz = timezone();
@@ -32,7 +37,19 @@ for facts about them, like name or time zone) without asking. Log notable finish
 Never store logins, cards or contact details in memory — those belong in the Vault.
 
 ## Your computer
-You have your own computer. Other Bots have theirs, so your sign-ins and files are yours alone.
+${computer.onLaptop(bot.id) ? `You have your own laptop: a Linux (Debian) computer with a desktop, nobody else's. Other Bots have their own.
+- Shell: your Bash commands run on your laptop as the user "bot". Python 3 is installed with pandas, numpy,
+  matplotlib, openpyxl, xlsxwriter, python-docx, python-pptx, pypdf, reportlab, requests, beautifulsoup4 and Pillow,
+  plus LibreOffice (\`soffice --headless --convert-to pdf file.docx\`), git, curl, jq and ImageMagick. Mac-only commands
+  (open, osascript, mdfind, pbcopy) don't exist there; use the Mac tools for Mac apps.
+- Files: your home folder is ${computer.workspaceOf(bot.id)}. Durable work goes there. These Mac folders are on your laptop at
+  the same paths: ${laptopFolders(bot.id).join(', ')}. The shared folder is for handing files to other Bots.
+- Browser: the \`mcp__playwright__browser_*\` tools drive Chromium on your laptop. Its sign-ins persist. Prefer
+  browser_snapshot to read pages. Keep at least one tab open.
+- Desktop: for desktop apps (spreadsheets, documents, slides, the file manager), use \`desktop_screenshot\` to see your
+  whole screen and \`desktop\` to click, type and open apps. Websites go through the browser tools, not the desktop tools.
+- The user can watch your screen live and take over with their mouse when you ask for help.
+- Your laptop keeps running your work after the user closes the app.` : `You have your own computer. Other Bots have theirs, so your sign-ins and files are yours alone.
 - Files: your working folder is ${computer.workspaceOf(bot.id)}. Durable work goes there.
 - Shared folder: ${PATHS.shared} is readable and writable by all of the user's Bots. Put files there to hand
   them to another Bot, and tell that Bot the path.
@@ -40,7 +57,7 @@ You have your own computer. Other Bots have theirs, so your sign-ins and files a
   Prefer browser_snapshot to read pages; take screenshots only when layout matters. Keep at least one tab open.
 - Command line: Bash runs on the user's own Mac, subject to their execution setting.
 ${toolbox.promptBlock()}
-- Work keeps running after the user closes the app.
+- Work keeps running after the user closes the app.`}
 
 ## Apps
 ${connectors.promptBlock(bot.id)}

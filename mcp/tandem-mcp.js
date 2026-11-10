@@ -50,6 +50,8 @@ async function handle(msg) {
       const r = await post(`${TANDEM_URL}/internal/call`, { tool: params.name, args: params.arguments || {}, ctx });
       const j = r.body;
       if (!r.ok) return reply(id, { content: [{ type: 'text', text: `Error: ${j?.error || r.status}` }], isError: true });
+      // A screenshot comes back as an image the model can see.
+      if (j.result && j.result.__image) return reply(id, { content: [{ type: 'image', data: j.result.__image, mimeType: j.result.mime || 'image/jpeg' }, ...(j.result.text ? [{ type: 'text', text: j.result.text }] : [])] });
       const text = typeof j.result === 'string' ? j.result : JSON.stringify(j.result, null, 2);
       return reply(id, { content: [{ type: 'text', text: text ?? 'ok' }] });
     } catch (e) {
