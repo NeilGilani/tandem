@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { ROOT, PATHS, uid, now, run as sql, setting } from './db.js';
+import { ROOT, PATHS, uid, now, run as sql, get as sqlGet, setting } from './db.js';
 import { CLAUDE_BIN, childEnv, quickJson } from './claude.js';
 import { emit } from './bus.js';
 import { pickModel } from './router.js';
@@ -20,11 +20,12 @@ import * as activity from './activity.js';
 export let PORT = 4747;
 export const setPort = (p) => { PORT = p; };
 
+const STALL_MS = Number(process.env.TANDEM_STALL_MS) || 20 * 60e3; // longer than the 10-minute command timeout
 const active = new Map(); // `${chatId}:${botId}` -> run
 const queues = new Map(); // same key -> promise chain for background work
 
 const READ_ONLY_TOOLS = [
-  'Read', 'Glob', 'Grep', 'LS', 'WebSearch', 'TodoWrite', 'Task', 'NotebookRead',
+  'Read', 'Glob', 'Grep', 'LS', 'WebSearch', 'WebFetch', 'TodoWrite', 'Task', 'Agent', 'BashOutput', 'NotebookRead',
   'mcp__tandem', // all Tandem tools (each one that needs you shows its own card)
   ...['snapshot', 'navigate', 'navigate_back', 'take_screenshot', 'tabs', 'wait_for', 'console_messages',
     'network_requests', 'resize', 'close', 'install'].map((t) => `mcp__playwright__browser_${t}`),
@@ -77,8 +78,11 @@ function toolStatus(name, input) {
     save_skill: 'Saving a skill', create_routine: 'Setting up a routine', draft_message: 'Drafting', ask_user: 'Asking you', request_connect: 'Waiting for you to connect an app',
     request_takeover: 'Waiting for you', vault_fill_login: 'Signing in', add_to_library: 'Saving to your Library', list_connectors: 'Checking connected apps' };
   const tn = name.replace(/^mcp__tandem__/, '');
+  if (tn === 'site_fetch' && name.startsWith('mcp__tandem__')) return `Pulling data from ${host(input.url || '')}`;
   if (name.startsWith('mcp__tandem__') && tandem[tn]) return tandem[tn];
   if (name === 'Bash' && input.description) return input.description.replace(/\.$/, '');
+  if (name === 'Skill') return `Loading know-how${input.skill ? `: ${String(input.skill).replace(/[-_]/g, ' ')}` : ''}`;
+  if ((name === 'Agent' || name === 'Task') && input.description) return `Side task: ${input.description.replace(/\.$/, '')}`;
   const map = { Bash: 'Running a command', Read: 'Reading files', Write: 'Writing a file', Edit: 'Editing a file', Grep: 'Searching files', Glob: 'Looking for files', WebSearch: 'Searching the web', WebFetch: 'Reading a web page' };
   if (map[name]) return map[name];
   return name.replace(/^mcp__(tandem|app_\w+)__/, '').replace(/_/g, ' ');
@@ -124,14 +128,89 @@ function waitFor(key) {
   return r ? r.done : Promise.resolve();
 }
 
+// The Claude Code flags for a turn (everything but the prompt itself).
+function runArgs(bot, chat, runCtx, sessKey) {
+  const sid = chats.sessionFor(sessKey, bot.id);
+  const newSid = sid ? null : crypto.randomUUID();
+  const mcpFile = mcpConfig(runCtx);
+  const args = [
+    '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
+    '--model', runCtx.model,
+    '--append-system-prompt', prompt.build(bot, chat, { origin: runCtx.origin }),
+    '--mcp-config', mcpFile, '--strict-mcp-config',
+    '--setting-sources', '',
+    '--permission-mode', 'acceptEdits',
+    '--permission-prompt-tool', 'mcp__tandem__approval_prompt',
+    '--allowedTools', ...READ_ONLY_TOOLS,
+    '--add-dir', PATHS.uploads, '--add-dir', PATHS.shared,
+    ...(sid ? ['--resume', sid] : ['--session-id', newSid]),
+  ];
+  return { args, mcpFile, sid, newSid };
+}
+const CHILD_ENV = () => childEnv({ MCP_TOOL_TIMEOUT: String(6 * 3600 * 1000), MCP_TIMEOUT: '60000', BASH_DEFAULT_TIMEOUT_MS: '600000' });
+
+// ---- Instant start ------------------------------------------------------------------
+// While you type to a Bot, its browser wakes and a Claude Code session starts and waits
+// for your message, so work begins the moment you send instead of ~5 seconds later.
+const warmPool = new Map(); // key -> { id, child, model, sid, newSid, mcpFile, pre, timer }
+const WARM_TTL = 75e3;
+
+export function warm(chatId) {
+  const chat = chats.getChat(chatId);
+  if (!chat || chat.kind !== 'dm') return false;
+  const botId = chat.bot_ids[0];
+  const bot = chats.getBot(botId);
+  const key = `${chatId}:${botId}`;
+  if (!bot || active.has(key)) return false;
+  const existing = warmPool.get(key);
+  if (existing) { clearTimeout(existing.timer); existing.timer = setTimeout(() => dropWarm(key), WARM_TTL); return true; }
+  if (warmPool.size >= 3) dropWarm(warmPool.keys().next().value);
+  const id = uid('run_');
+  const model = pickModel('', { origin: 'chat' });
+  const ctx = { id, botId, chatId, missionId: null, origin: 'chat', model, opts: {} };
+  const { args, mcpFile, sid, newSid } = runArgs(bot, chat, ctx, chatId);
+  const entry = { id, model, sid, newSid, mcpFile, pre: [], child: null, timer: null };
+  warmPool.set(key, entry);
+  computer.ensureBrowser(botId).catch(() => {});
+  const child = spawn(CLAUDE_BIN, ['-p', '--input-format', 'stream-json', ...args], { cwd: computer.workspaceOf(botId), env: CHILD_ENV(), stdio: ['pipe', 'pipe', 'pipe'] });
+  entry.child = child;
+  entry.onData = (d) => entry.pre.push(d);
+  child.stdout.on('data', entry.onData);
+  child.on('close', () => { if (warmPool.get(key) === entry) { warmPool.delete(key); try { fs.unlinkSync(mcpFile); } catch {} } });
+  entry.timer = setTimeout(() => dropWarm(key), WARM_TTL);
+  return true;
+}
+
+function dropWarm(key) {
+  const e = warmPool.get(key);
+  if (!e) return;
+  warmPool.delete(key);
+  clearTimeout(e.timer);
+  try { e.child.kill('SIGTERM'); } catch {}
+  try { fs.unlinkSync(e.mcpFile); } catch {}
+}
+
+// A warm session can take this turn only if it was started exactly as this turn would be.
+function takeWarm(key, { chatId, botId, model, opts }) {
+  const e = warmPool.get(key);
+  if (!e) return null;
+  const fits = opts.origin === 'chat' && !opts.sessionKey && !opts.depth && !opts.preapproved && !opts.missionId && !opts.model
+    && e.model === model && chats.sessionFor(chatId, botId) === e.sid && e.child.exitCode === null;
+  warmPool.delete(key);
+  clearTimeout(e.timer);
+  if (!fits) { try { e.child.kill('SIGTERM'); } catch {} try { fs.unlinkSync(e.mcpFile); } catch {} return null; }
+  return e;
+}
+
 function start(botId, chatId, text, opts) {
   const bot = chats.getBot(botId);
   const chat = chats.getChat(chatId);
   if (!bot || !chat) return Promise.resolve({ error: 'Bot or chat not found' });
-  const id = uid('run_');
   const model = opts.model || pickModel(text, { origin: opts.origin, attachments: (opts.attachments || []).length });
-  const runCtx = { id, botId, chatId, missionId: opts.missionId || null, origin: opts.origin, model, status: 'Thinking', started: now(), messageId: null, text: '', opts, steps: [], tail: [], toolActs: new Map(), trail: [], live: '' };
   const key = `${opts.sessionKey || chatId}:${botId}`;
+  const warmed = takeWarm(key, { chatId, botId, model, opts });
+  const id = warmed?.id || uid('run_');
+  const runCtx = { id, botId, chatId, missionId: opts.missionId || null, origin: opts.origin, model, status: 'Thinking', started: now(), messageId: null, text: '', opts, steps: [], tail: [], toolActs: new Map(), trail: [], live: '', warm: !!warmed, writes: new Set(), hosts: new Set() };
 
   let fullText = text;
   if (chat.kind === 'group' && opts.origin === 'chat') {
@@ -143,22 +222,9 @@ function start(botId, chatId, text, opts) {
 
   // Missions keep their own conversation, separate from your chat with the Bot.
   const sessKey = opts.sessionKey || chatId;
-  const sid = chats.sessionFor(sessKey, botId);
-  const newSid = sid ? null : crypto.randomUUID();
-  const mcpFile = mcpConfig(runCtx);
-  const args = [
-    '-p', fullText,
-    '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
-    '--model', model,
-    '--append-system-prompt', prompt.build(bot, chat, { origin: opts.origin }),
-    '--mcp-config', mcpFile, '--strict-mcp-config',
-    '--setting-sources', '',
-    '--permission-mode', 'acceptEdits',
-    '--permission-prompt-tool', 'mcp__tandem__approval_prompt',
-    '--allowedTools', ...READ_ONLY_TOOLS,
-    '--add-dir', PATHS.uploads, '--add-dir', PATHS.shared,
-    ...(sid ? ['--resume', sid] : ['--session-id', newSid]),
-  ];
+  let mcpFile, args = null, newSid;
+  if (warmed) ({ mcpFile, newSid } = warmed);
+  else { const r = runArgs(bot, chat, runCtx, sessKey); mcpFile = r.mcpFile; newSid = r.newSid; args = ['-p', fullText, ...r.args]; }
   if (newSid) chats.setSession(sessKey, botId, newSid);
 
   let resolveDone;
@@ -182,14 +248,22 @@ function start(botId, chatId, text, opts) {
   return runCtx.done;
 
   function launch() {
-  const child = spawn(CLAUDE_BIN, args, {
-    cwd: computer.workspaceOf(botId),
-    env: childEnv({ MCP_TOOL_TIMEOUT: String(6 * 3600 * 1000), MCP_TIMEOUT: '60000', BASH_DEFAULT_TIMEOUT_MS: '600000' }),
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  const child = warmed ? warmed.child : spawn(CLAUDE_BIN, args, { cwd: computer.workspaceOf(botId), env: CHILD_ENV(), stdio: ['ignore', 'pipe', 'pipe'] });
   runCtx.child = child;
 
   let buf = '', stderr = '', resultEvt = null;
+  // Watchdog: a step that hangs with no progress (and isn't waiting on you) gets restarted,
+  // and the Bot picks up where it left off.
+  runCtx.lastEvent = now();
+  const watchdog = setInterval(() => {
+    if (now() - runCtx.lastEvent < STALL_MS || runCtx.stopped) return;
+    const waitingOnYou = sqlGet(`SELECT 1 AS x FROM messages WHERE chat_id = ? AND bot_id = ? AND card LIKE '%"status":"pending"%' LIMIT 1`, chatId, botId);
+    if (waitingOnYou) { runCtx.lastEvent = now(); return; }
+    runCtx.stalled = true;
+    clearInterval(watchdog);
+    child.kill('SIGTERM');
+    setTimeout(() => { try { child.kill('SIGKILL'); } catch {} }, 4000);
+  }, Math.min(60e3, STALL_MS / 4));
   child.stdout.on('data', (d) => {
     buf += d;
     let i;
@@ -202,6 +276,11 @@ function start(botId, chatId, text, opts) {
     }
   });
   child.stderr.on('data', (d) => (stderr += d));
+  if (warmed) {
+    child.stdout.off('data', warmed.onData);
+    for (const d of warmed.pre) child.stdout.emit('data', d);
+    child.stdin.end(JSON.stringify({ type: 'user', message: { role: 'user', content: fullText } }) + '\n');
+  }
 
   // Keep a recent screenshot of the computer for the in-chat Computer card.
   let shotTimer = null;
@@ -230,6 +309,8 @@ function start(botId, chatId, text, opts) {
     pushTimer = setTimeout(() => { pushTimer = null; emit('run', publicRun(runCtx)); }, 70);
   }
   function handleEvent(evt) {
+    // Heartbeats while a tool runs aren't progress; everything else is.
+    if (evt.type !== 'tool_progress' && !(evt.type === 'system' && evt.subtype === 'status')) runCtx.lastEvent = now();
     if (evt.type === 'stream_event') {
       const e = evt.event || {};
       if (evt.parent_tool_use_id) return; // a sub-agent's stream; the trail covers it
@@ -251,6 +332,9 @@ function start(botId, chatId, text, opts) {
           // Claude Code's own housekeeping isn't work the user cares to see.
           if (HIDDEN_TOOLS.has(block.name)) { setStatus('Getting ready'); continue; }
           if (block.name.startsWith('mcp__playwright__')) { runCtx.browser = true; snapshotSoon(); }
+          const inp = block.input || {};
+          if (/^(Write|Edit|MultiEdit|NotebookEdit)$/.test(block.name) && (inp.file_path || inp.notebook_path)) runCtx.writes.add(inp.file_path || inp.notebook_path);
+          if (inp.url && /^https?:/.test(inp.url)) runCtx.hosts.add(host(inp.url));
           const label = toolStatus(block.name, block.input || {});
           runCtx.steps.push({ k: 'tool', t: label });
           runCtx.tail = [];
@@ -287,6 +371,7 @@ function start(botId, chatId, text, opts) {
   function postFinal(finalText) {
     const t = (finalText || '').trim();
     if (!t || (chat.kind === 'group' && /^PASS\.?$/i.test(t))) return;
+    if (opts.origin === 'squad') { runCtx.text = t; return; } // a helper's report goes to its lead, not the chat
     let shot = null;
     if (runCtx.browser && runCtx.lastShot) shot = runCtx.lastShot;
     const tailSet = new Set(runCtx.tail);
@@ -294,12 +379,14 @@ function start(botId, chatId, text, opts) {
       .slice(-80).map((x) => ({ k: x.k, t: x.t.slice(0, 600) }));
     runCtx.text = t;
     const m = chats.addMessage({ chatId, author: 'bot', botId, text: t, parentId: opts.parentId || null,
-      meta: { runId: id, model, origin: opts.origin, steps, duration: now() - runCtx.started, browser: !!runCtx.browser, shot } });
+      meta: { runId: id, model, origin: opts.origin, steps, duration: now() - runCtx.started, browser: !!runCtx.browser, shot,
+        files: producedFiles(botId, runCtx), sites: [...runCtx.hosts].filter(Boolean).slice(0, 12) } });
     runCtx.messageId = m.id;
     if ((opts.origin === 'chat' || opts.origin === 'system') && chat.kind === 'dm' && !/^\[Voice call\]/.test(text)) suggestNext(m, text, t);
   }
 
   child.on('close', (code) => {
+    clearInterval(watchdog);
     if (active.get(key) === runCtx) active.delete(key);
     try { fs.unlinkSync(mcpFile); } catch {}
     approvals.cancelFor(id);
@@ -311,6 +398,8 @@ function start(botId, chatId, text, opts) {
         (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0), u.output_tokens || 0, opts.origin, now());
       if (resultEvt.is_error) error = resultEvt.result || resultEvt.subtype || 'Run failed';
       else postFinal(resultEvt.result || runCtx.tail.join('\n\n'));
+    } else if (runCtx.stalled) {
+      error = `A step hung with no progress for ${STALL_MS / 60e3} minutes`;
     } else if (!runCtx.stopped) {
       error = stderr.trim().split('\n').slice(-3).join(' ') || `Claude Code exited with code ${code}`;
     }
@@ -324,7 +413,7 @@ function start(botId, chatId, text, opts) {
     if (error && !runCtx.stopped) {
       const errText = `${error} ${stderr}`;
       const limited = /usage limit|rate.?limit|limit reached|429|quota/i.test(errText) || (runCtx.rate && runCtx.rate.status && runCtx.rate.status !== 'allowed');
-      const transient = /overloaded|529|5\d\d|timeout|timed out|ECONN|EPIPE|socket hang up|network|exited with code|terminated|Internal server error/i.test(errText);
+      const transient = runCtx.stalled || /overloaded|529|5\d\d|timeout|timed out|ECONN|EPIPE|socket hang up|network|exited with code|terminated|Internal server error/i.test(errText);
       const tries = opts._resumes || 0;
       activity.log({ runId: id, botId, chatId, kind: 'error', summary: limited ? 'Paused: Claude plan limit' : 'Run interrupted', detail: error, status: 'error', origin: opts.origin });
       if (limited) {
@@ -349,9 +438,30 @@ function start(botId, chatId, text, opts) {
     if (opts.replyTo && runCtx.text && !error) deliverReply(botId, opts.replyTo, runCtx.text, opts.depth || 0);
     computer.touch(botId);
     activity.finish(runCtx.runAct, runCtx.stopped ? 'stopped' : error ? 'error' : 'ok', runCtx.text ? runCtx.text.slice(0, 1500) : null);
-    resolveDone({ error, text: runCtx.text, messageId: runCtx.messageId });
+    resolveDone({ error, text: runCtx.text, messageId: runCtx.messageId, shot: runCtx.browser ? runCtx.lastShot || null : null });
   });
   }
+}
+
+// Files a turn made or changed: what it wrote, plus anything new in its working folder.
+const SKIP_DIRS = new Set(['node_modules', '__pycache__', 'venv', '.venv', 'site-packages']);
+const KIND = (f) => /\.(png|jpe?g|gif|webp|svg)$/i.test(f) ? 'image' : /\.(csv|tsv|xlsx?)$/i.test(f) ? 'sheet' : /\.(md|txt|docx?|pdf|rtf)$/i.test(f) ? 'doc'
+  : /\.(pptx?|key)$/i.test(f) ? 'slides' : /\.(html?)$/i.test(f) ? 'page' : /\.(json|js|ts|py|sh|css)$/i.test(f) ? 'code' : 'file';
+function producedFiles(botId, runCtx) {
+  const since = runCtx.started - 1000;
+  const found = new Map();
+  const add = (f) => { try { const st = fs.statSync(f); if (st.isFile() && st.mtimeMs >= since) found.set(f, { path: f, name: path.basename(f), size: st.size, kind: KIND(f), at: st.mtimeMs }); } catch {} };
+  for (const f of runCtx.writes) add(f);
+  const walk = (dir, depth) => {
+    let list; try { list = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of list) {
+      if (e.name.startsWith('.') || SKIP_DIRS.has(e.name)) continue;
+      const f = path.join(dir, e.name);
+      if (e.isDirectory()) { if (depth < 3) walk(f, depth + 1); } else add(f);
+    }
+  };
+  walk(computer.workspaceOf(botId), 0);
+  return [...found.values()].filter((x) => !/\/(\.site|\.browser)\//.test(x.path)).sort((a, b) => b.at - a.at).slice(0, 8).map(({ at, ...x }) => x);
 }
 
 // Two or three tappable next steps under a Bot's answer (one small, cheap call).
@@ -393,7 +503,7 @@ export function stopChat(chatId) {
   for (const r of active.values()) if (r.chatId === chatId) stop(r.id);
 }
 
-const publicRun = (r) => ({ id: r.id, botId: r.botId, chatId: r.chatId, missionId: r.missionId, status: r.status, model: r.model, origin: r.origin, started: r.started,
+const publicRun = (r) => ({ id: r.id, botId: r.botId, chatId: r.chatId, missionId: r.missionId, squadId: r.opts?.squadId || null, status: r.status, model: r.model, origin: r.origin, started: r.started,
   steps: r.steps?.length || 0, browser: !!r.browser, live: (r.live || '').slice(-4000),
   trail: (r.trail || []).slice(-14).map(({ k, t, s, ms }) => ({ k, t, s, ms })), trailTotal: (r.trail || []).filter((x) => x.k === 'tool').length });
 export const activeRuns = () => [...active.values()].map(publicRun);

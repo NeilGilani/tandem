@@ -78,6 +78,7 @@ CREATE TABLE IF NOT EXISTS connector_status (
 );
 `);
 try { db.exec('ALTER TABLE bots ADD COLUMN cdp_port INTEGER'); } catch {}
+try { db.exec('ALTER TABLE bots ADD COLUMN helper_of TEXT'); } catch {} // squad helpers belong to a lead Bot
 
 export const uid = (p = '') => p + crypto.randomBytes(8).toString('hex');
 export const now = () => Date.now();
@@ -89,7 +90,7 @@ export const run = (sql, ...a) => db.prepare(sql).run(...a);
 const DEFAULT_SETTINGS = {
   auto_review: '1',
   timezone: 'auto',
-  local_execution: 'ask', // ask | always | never
+  local_execution: 'smart', // smart (only risky commands ask) | ask | always | never
   theme: 'system',
   access_token: crypto.randomBytes(16).toString('hex'),
 };

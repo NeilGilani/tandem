@@ -16,6 +16,7 @@ import * as mac from './mac.js';
 import { CATALOG } from './catalog.js';
 import * as activity from './activity.js';
 import * as missions from './missions.js';
+import * as squads from './squads.js';
 
 let engine = null;
 export const attach = (e) => { engine = e; };
@@ -67,6 +68,12 @@ export const DEFS = [
   ['mission_checkpoint', 'End a mission work session. Record what you did and decide what happens next: continue right away, wait until a time, blocked on the user, or done.',
     S({ note: str('What you did this session and where you left off (your future self reads this)'), next: { type: 'string', enum: ['continue', 'wait', 'blocked', 'done'] },
       wait_until: str('ISO date-time to wake up, when next="wait"'), wait_reason: str('What you will do when you wake up'), blocked_reason: str('What you need from the user, when next="blocked"'), summary: str('Final summary of results, when next="done"') }, ['note', 'next'])],
+  ['start_squad', 'Split a big job into independent parts that helper Bots do at the same time, each on its own computer (a copy of yours, with your sign-ins). Use it when the work divides cleanly and each part takes real effort: research many companies, find leads in several places, check many sites, draft many personal emails. Not for quick tasks or steps that depend on each other. Returns right away: end your turn with one short line, and you will be woken with every part\'s result to check, merge and deliver.',
+    S({ goal: str('The overall outcome, in the user\'s terms'), parts: { type: 'array', description: '2 to 8 self-contained parts', items: S({ title: str('Short name for the part'), task: str('Exactly what to do and what to produce, so a helper can do it alone') }, ['title', 'task']) },
+      merge: str('How the parts should be combined at the end, e.g. "one sheet with all leads" (optional)') }, ['goal', 'parts'])],
+  ['site_fetch', "Call a website's own data URLs with your browser's sign-in (cookies and session), without clicking through pages. For bulk reads like a whole inbox, sheet, CRM list or report: find the URLs the page itself loads with browser_network_requests, then fetch them here and page through with their cursor or offset. The full response is saved to a file in your working folder; you get a preview. GET is read-only; other methods ask the user first unless it's a GraphQL query.",
+    S({ url: str('Full URL'), method: str('GET (default), POST, PUT, PATCH or DELETE'), headers: { type: 'object', description: 'Extra request headers (e.g. a CSRF token or x-requested-with the site expects)' },
+      body: str('Request body, for POST and the like'), save_as: str('File name in your working folder for the full response (optional)') }, ['url'])],
   ['notify_user', 'Send the user a push notification (use sparingly).', S({ title: str(''), body: str('') }, ['body'])],
   // Mac apps (only usable when the matching app is connected)
   ['mac_calendar_events', 'Calendar (Mac): list upcoming events.', S({ days: num('Days ahead (default 7)'), calendar: str('Calendar name') })],
@@ -193,6 +200,41 @@ function findApp(name) {
 }
 
 // ---- Dispatcher ------------------------------------------------------------------------
+// A website's own data, fetched with the Bot's sign-in. Big responses go to a file.
+async function siteFetch(args, ctx) {
+  const url = String(args.url || '');
+  let u; try { u = new URL(url); } catch { throw new Error('Pass a full URL, starting with https://'); }
+  if (!/^https?:$/.test(u.protocol)) throw new Error('Only http and https URLs');
+  const method = String(args.method || 'GET').toUpperCase();
+  const body = args.body == null ? null : typeof args.body === 'string' ? args.body : JSON.stringify(args.body);
+  const readOnly = /^(GET|HEAD|OPTIONS)$/.test(method) || (method === 'POST' && /^\s*\{?\s*"?(query|operationName)"?/.test(body || '') && !/\bmutation\b/.test(body || ''));
+  if (!readOnly) {
+    const chat = chats.getChat(ctx.chatId);
+    const dctx = { ...ctx, isGroup: chat?.kind === 'group', chatId: chat?.kind === 'group' ? chats.dmFor(ctx.botId).id : ctx.chatId };
+    const v = await approvals.confirm('site_fetch', { url, method, body: (body || '').slice(0, 2000) }, dctx,
+      { summary: `${method} to ${u.host} with your sign-in`, url, warnings: [method === 'DELETE' ? "This can't be undone" : 'This changes data on that site'] });
+    if (v.behavior !== 'allow') return v.message || 'The user denied this request.';
+  }
+  const r = await computer.siteFetch(ctx.botId, { url, method, headers: args.headers || {}, body });
+  const dir = path.join(computer.workspaceOf(ctx.botId), args.save_as ? '' : '.site');
+  const json = /json/.test(r.type) || /^\s*[[{]/.test(r.text.slice(0, 50));
+  const name = args.save_as ? path.basename(String(args.save_as)) : `${u.host}-${Date.now()}.${json ? 'json' : /html/.test(r.type) ? 'html' : 'txt'}`;
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, name);
+  fs.writeFileSync(file, r.text);
+  let shape = '';
+  if (json) {
+    try {
+      const j = JSON.parse(r.text.replace(/^\)\]\}'[^\n]*\n/, ''));
+      const describeShape = (v, d = 0) => Array.isArray(v) ? `array(${v.length})${v.length && d < 2 ? ` of ${describeShape(v[0], d + 1)}` : ''}`
+        : v && typeof v === 'object' ? (d > 2 ? 'object' : `{${Object.keys(v).slice(0, 25).map((k) => `${k}: ${describeShape(v[k], d + 1)}`).join(', ')}}`) : typeof v;
+      shape = describeShape(j);
+    } catch {}
+  }
+  return [`${method} ${r.url} → ${r.status} (${r.type || 'unknown type'}, ${r.text.length.toLocaleString()} characters)`,
+    `Saved to ${file}`, shape && `Shape: ${shape.slice(0, 1500)}`, `Preview:\n${r.text.slice(0, shape ? 1500 : 3000)}`].filter(Boolean).join('\n');
+}
+
 export async function call(tool, args = {}, ctx) {
   const bot = chats.getBot(ctx.botId);
   if (!bot) throw new Error('Bot no longer exists');
@@ -205,6 +247,11 @@ export async function call(tool, args = {}, ctx) {
   }
 
   switch (tool) {
+    case 'site_fetch': return siteFetch(args, ctx);
+    case 'start_squad': {
+      const r = await squads.start({ leadId: ctx.botId, chatId: ctx.chatId, goal: args.goal, parts: args.parts, merge: args.merge });
+      return `Squad started: ${r.parts} parts, ${r.parallel} at a time, writing to ${r.folder}. End your turn now with one short line to the user. You'll be woken with the results.`;
+    }
     case 'approval_prompt': {
       const chat = chats.getChat(ctx.chatId);
       const decisionCtx = { ...ctx, isGroup: chat?.kind === 'group' };

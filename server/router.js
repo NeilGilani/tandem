@@ -6,7 +6,8 @@ const LIGHT = /^(hi|hey|hello|thanks|thank you|ok|okay|cool|great|nice|yes|no|su
 export function pickModel(text = '', { origin = 'chat', attachments = 0 } = {}) {
   const t = String(text);
   if (LIGHT.test(t.trim())) return 'haiku';
-  if (origin === 'routine' || origin === 'handoff') return HEAVY.test(t) ? 'opus' : 'sonnet';
+  if (origin === 'mission') return 'opus'; // long unattended work gets the strongest model
+  if (origin === 'routine' || origin === 'handoff' || origin === 'squad') return HEAVY.test(t) ? 'opus' : 'sonnet';
   if (HEAVY.test(t) || t.length > 1200 || attachments > 2) return 'opus';
   return 'sonnet';
 }

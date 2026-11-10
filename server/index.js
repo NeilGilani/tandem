@@ -17,6 +17,8 @@ import * as memory from './memory.js';
 import * as vault from './vault.js';
 import { TEMPLATES } from './templates.js';
 import * as activity from './activity.js';
+import * as toolbox from './toolbox.js';
+import * as squads from './squads.js';
 import * as missions from './missions.js';
 import { spawn as spawnProc } from 'node:child_process';
 import { CATEGORIES } from './catalog.js';
@@ -27,6 +29,7 @@ engine.setPort(PORT);
 tools.attach(engine);
 routines.attach(engine);
 missions.attach(engine);
+squads.attach(engine);
 
 const WEB = path.join(ROOT, 'web');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json',
@@ -78,6 +81,8 @@ function lanUrls() {
 function stateSnapshot() {
   return {
     bots: chats.listBots(),
+    helpers: chats.listHelpers(),
+    squads: squads.list(12).map(squads.publicSquad),
     chats: chats.listChats().map((c) => ({ ...c, last: lastPreview(c.id) })),
     sections: all('SELECT * FROM sections ORDER BY position'),
     runs: engine.activeRuns(),
@@ -107,6 +112,7 @@ function lastPreview(chatId) {
 function publicSettings() {
   return {
     auto_review: setting('auto_review') === '1',
+    toolbox: toolbox.status().state,
     timezone: setting('timezone'),
     resolved_timezone: timezone(),
     local_execution: setting('local_execution'),
@@ -198,6 +204,8 @@ route('POST', '/api/chats/:id/messages', async (req, res, p) => {
   engine.onUserMessage(p.id, msg).catch((e) => console.error('run', e));
   return msg;
 });
+route('POST', '/api/squads/:id/stop', (req, res, p) => ({ ok: squads.stop(p.id) }));
+route('POST', '/api/chats/:id/warm', (req, res, p) => ({ ok: engine.warm(p.id) }));
 route('POST', '/api/chats/:id/stop', (req, res, p) => { engine.stopChat(p.id); return { ok: true }; });
 route('POST', '/api/chats/:id/reset', (req, res, p) => { engine.stopChat(p.id); chats.resetChat(p.id); return { ok: true }; });
 route('POST', '/api/messages/:id/react', async (req, res, p) => chats.react(p.id, (await readJson(req)).emoji));
@@ -260,7 +268,7 @@ route('PATCH', '/api/settings', async (req) => {
   const b = await readJson(req);
   if (b.auto_review != null) setSetting('auto_review', b.auto_review ? '1' : '0');
   if (b.timezone) { setSetting('timezone', b.timezone); routines.recomputeAll(); }
-  if (b.local_execution && ['ask', 'always', 'never'].includes(b.local_execution)) setSetting('local_execution', b.local_execution);
+  if (b.local_execution && ['smart', 'ask', 'always', 'never'].includes(b.local_execution)) setSetting('local_execution', b.local_execution);
   if (b.theme) setSetting('theme', b.theme);
   if (b.user_name != null) setSetting('user_name', String(b.user_name).trim().slice(0, 60));
   if (b.usage_guard != null) setSetting('usage_guard', b.usage_guard ? '1' : '0');
@@ -430,8 +438,10 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && !p.startsWith('/api/')) {
     const file = path.join(WEB, p === '/' ? 'index.html' : path.normalize(p).replace(/^(\.\.[/\\])+/, ''));
-    if (file.startsWith(WEB) && fs.existsSync(file) && fs.statSync(file).isFile()) return serveFile(res, file);
-    return serveFile(res, path.join(WEB, 'index.html'));
+    // App files revalidate every load, so an update never leaves stale screens behind.
+    const fresh = { 'Cache-Control': 'no-cache' };
+    if (file.startsWith(WEB) && fs.existsSync(file) && fs.statSync(file).isFile()) return serveFile(res, file, /\/logos\//.test(file) ? {} : fresh);
+    return serveFile(res, path.join(WEB, 'index.html'), fresh);
   }
   json(res, 404, { error: 'Not found' });
 });
@@ -444,6 +454,8 @@ setInterval(() => connectors.refresh().catch(() => {}), 3 * 60 * 1000);
 setInterval(() => activity.prune(), 6 * 3600 * 1000);
 // Missions: wake Bots on schedule, and resume what was due while Tandem was off.
 missions.recover();
+toolbox.ensure(); // shared Python for Bots, built once in the background
+squads.recover();
 setInterval(() => missions.tick(), 15 * 1000);
 // Keep the Mac from idle-sleeping while Bots work or a mission wakes soon (the lid still sleeps it).
 let caffeinate = null;

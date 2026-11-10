@@ -28,6 +28,12 @@ for (const col of ['tool', 'pattern']) {
   try { db.exec(`ALTER TABLE rules ADD COLUMN ${col} TEXT`); } catch {}
 }
 
+// v0.5: "Ask every time" for commands was replaced as the default by "Only risky commands".
+if (!setting('exec_v2')) {
+  if (setting('local_execution') === 'ask') run("UPDATE settings SET value = 'smart' WHERE key = 'local_execution'");
+  run("INSERT OR REPLACE INTO settings (key, value) VALUES ('exec_v2', '1')");
+}
+
 export const rules = () => all('SELECT * FROM rules ORDER BY created');
 
 export function addRule(kind, text, { tool = null, pattern = null } = {}) {
@@ -52,32 +58,69 @@ const BROWSER_ANY = /^mcp__playwright__browser_/;
 
 // ---- Shell commands ------------------------------------------------------------------
 
-// The programs a shell command runs, ignoring heredoc bodies, quoted text and VAR=… prefixes.
-export function programsOf(command = '') {
+// The simple commands in a shell line, as words, ignoring heredoc bodies, quoted text and
+// VAR=… prefixes. The first word of each is the program ('sudo' is kept as its own entry).
+function commandsOf(command = '') {
   let cmd = String(command);
   cmd = cmd.replace(/<<-?\s*['"]?(\w+)['"]?[^\n]*\n[\s\S]*?\n\s*\1\s*(\n|$)/g, '\n');
   cmd = cmd.replace(/\\ /g, '_');
   cmd = cmd.replace(/'[^']*'/g, "''").replace(/"(?:\\.|[^"\\])*"/g, '""');
-  const out = new Set();
+  const out = [];
   for (const seg of cmd.split(/&&|\|\||;|\||\n|\$\(|`/)) {
     const words = seg.trim().split(/\s+/).filter(Boolean);
     while (words.length && /^\w+=/.test(words[0])) words.shift();
     while (words.length && ['sudo', 'env', 'time', 'nohup', 'exec', 'then', 'do', 'else', '{', '(', '!'].includes(words[0])) {
-      if (words[0] === 'sudo') out.add('sudo');
+      if (words[0] === 'sudo') out.push(['sudo']);
       words.shift();
     }
     let w = words[0];
     if (!w || /^[)}]|^(fi|done|esac|for|while|if|in)$/.test(w)) continue;
     w = w.replace(/^["'(]+|[)"']+$/g, '');
     if (w.includes('/')) w = w.split('/').pop();
-    if (w) out.add(w);
+    if (w) out.push([w, ...words.slice(1)]);
   }
-  return [...out];
+  return out;
 }
+export const programsOf = (command = '') => [...new Set(commandsOf(command).map((c) => c[0]))];
 
 const READ_ONLY_PROGRAMS = new Set(['ls', 'cat', 'head', 'tail', 'grep', 'egrep', 'rg', 'wc', 'pwd', 'echo', 'printf', 'date', 'which',
   'file', 'stat', 'cd', 'test', 'true', 'false', 'sort', 'uniq', 'cut', 'tr', 'basename', 'dirname', 'realpath', 'du', 'df', 'jq',
-  'shasum', 'md5', 'diff', 'tree', 'less', 'column', 'awk', 'seq', 'whoami', 'uname', 'sw_vers', 'mdfind', 'plutil']);
+  'shasum', 'md5', 'diff', 'tree', 'less', 'column', 'awk', 'seq', 'whoami', 'uname', 'sw_vers', 'mdfind', 'plutil',
+  'nl', 'comm', 'paste', 'fold', 'rev', 'strings', 'xxd', 'od', 'cmp', 'ps', 'id', 'hostname', 'sleep', 'type', 'command']);
+
+// "Only risky commands" mode: everyday local work (reading, writing and organizing files,
+// running scripts, fetching pages) runs on its own. These are the things that still ask.
+const SCRIPT_PROGRAMS = /^(python3?|node|ruby|perl|swift|php|deno|bun|bash|sh|zsh)$/;
+const SENSITIVE_PATH = /(~|\$HOME|\/Users\/[^/\s"']+)\/(\.(ssh|aws|gnupg|netrc|zshrc|zprofile|zshenv|bashrc|bash_profile|profile|gitconfig|kube|docker)\b|\.config\/gh\b|Library\/(Keychains|LaunchAgents|Cookies)\b)|(^|[\s"'=:])\/(etc|System|bin|sbin|private\/etc|Library\/(LaunchDaemons|LaunchAgents|Keychains))\b|(^|[\s"'=:])\/usr\/(?!local\b)/;
+const safeTarget = (a) => a && a !== '""' && a !== "''" && !/^(~|\$|\.\.|\*$|\/(?!tmp\/|private\/tmp\/|var\/folders\/))/.test(a);
+
+export function localRisk(command) {
+  const c = String(command);
+  const cmds = commandsOf(c);
+  const progs = cmds.map((x) => x[0]);
+  const w = new Set();
+  for (const [p, ...args] of cmds) {
+    const targets = args.filter((a) => !a.startsWith('-'));
+    if (p === 'rm' || p === 'rmdir' || p === 'unlink' || p === 'shred') { if (!targets.length || !targets.every(safeTarget)) w.add('Deletes files outside its working folder'); }
+    else if (p === 'find' && args.some((a) => a === '-delete' || a === '-exec' || a === '-execdir')) w.add('Deletes or changes many files');
+    else if (/^(kill|pkill|killall)$/.test(p)) w.add('Stops programs running on your Mac');
+    else if (p === 'osascript') w.add('Controls other apps on your Mac');
+    else if (p === 'brew' && /^(install|reinstall|upgrade|uninstall|remove|tap)$/.test(args[0] || '')) w.add('Installs or removes software on your Mac');
+    else if (/^(npm|pnpm|yarn)$/.test(p) && args.some((a) => a === '-g' || a === '--global' || a === 'global')) w.add('Installs software for your whole Mac');
+    else if (/^(gem|port|softwareupdate|installer|mas)$/.test(p)) w.add('Installs or removes software on your Mac');
+    else if (p === 'crontab' || p === 'pmset' || p === 'networksetup' || p === 'scutil' || p === 'csrutil' || p === 'spctl') w.add('This changes system or security settings');
+  }
+  const writes = /(^|[^<>&0-9])>>?\s*[^&\s]|\btee\b|\b(cp|mv|ln|chmod|touch|mkdir|install|sed\s+-i|perl\s+-pi)\b/.test(c);
+  const scripts = progs.some((p) => SCRIPT_PROGRAMS.test(p));
+  if (SENSITIVE_PATH.test(c) && (writes || scripts)) w.add('Touches system, sign-in or startup files');
+  if (scripts) {
+    // A script's own code is in the command (inline or a heredoc): look at what it does.
+    if (/requests\.(post|put|patch|delete)\(|urlopen\([^)]*data\s*=|method\s*[:=]\s*['"](POST|PUT|PATCH|DELETE)|smtplib|sendmail|axios\.(post|put|patch|delete)|\bcurl\b[^\n]*\s(-d|--data\S*|-F|-T|-X\s*(POST|PUT|PATCH|DELETE))\s/i.test(c)) w.add('This shares your data outside this computer');
+    if (/shutil\.rmtree|os\.(remove|unlink|rmdir|removedirs)\(|\.unlink\(|unlinkSync|rmSync|rmdirSync|send2trash|\brm\s+-\w*[rf]/.test(c)) w.add('Deletes files');
+    if (/keyring|Keychain|find-(generic|internet)-password/i.test(c)) w.add('Reads saved passwords');
+  }
+  return [...w];
+}
 
 function shellDanger(command) {
   const c = String(command);
@@ -91,6 +134,8 @@ function shellDanger(command) {
     w.push('This shares your data outside this computer');
   }
   if (/\b(defaults\s+write|launchctl|security\s+(delete|add)|chmod\s+-R|chown)\b/.test(c)) w.push('This changes system or security settings');
+  if (/\bsecurity\s+(find-(generic|internet)-password|dump-keychain)\b/.test(c)) w.push('Reads saved passwords');
+  if (/(~|\$HOME|\/Users\/[^/\s"']+)\/(\.(ssh|aws|gnupg|netrc|kube|docker)\b|\.config\/gh\b|Library\/(Keychains|Cookies)\b)/.test(c)) w.push('Reads private keys or saved sign-ins');
   return w;
 }
 
@@ -145,7 +190,18 @@ function structuredRule(tool, input, pageUrl) {
       file_upload: 'Uploading files', evaluate: 'Running scripts', handle_dialog: 'Answering dialogs', drag: 'Dragging', hover: 'Hovering' }[act] || act;
     return { tool, pattern: h, label: `Always allow on ${h}`, text: `${verb} on ${h}` };
   }
+  if (tool === 'site_fetch') {
+    const h = host(pageUrl) || '*';
+    return { tool, pattern: h, label: `Always allow on ${h}`, text: `Sending data to ${h} with your sign-in` };
+  }
   return { tool, pattern: '*', label: 'Always allow', text: describe(tool, input) };
+}
+
+// For Tandem's own tools that change things somewhere: ask unless an Always allow rule covers
+// it. Resolves to { behavior: 'allow' | 'deny', message }.
+export function confirm(tool, input, ctx, { summary, url, warnings = [] }) {
+  if (ctx.preapproved || structuredMatch(tool, input, url, 'allow')) return Promise.resolve({ behavior: 'allow' });
+  return ask(tool, input, summary, url, ctx, { kind: 'safety', warnings });
 }
 
 function structuredMatch(tool, input, pageUrl, kind) {
@@ -207,11 +263,21 @@ export async function decide(tool, input, ctx) {
     const readOnly = progs.every((p) => READ_ONLY_PROGRAMS.has(p));
     if (danger.length) return ask(tool, input, summary, pageUrl, ctx, { kind: 'command', warnings: danger });
     if (mode === 'always' || readOnly || structuredMatch(tool, input, pageUrl, 'allow')) return allow();
+    if (mode === 'smart') {
+      const risk = ctx.preapproved ? [] : localRisk(input.command);
+      if (risk.length) return ask(tool, input, summary, pageUrl, ctx, { kind: 'command', warnings: risk });
+      const r = await textRuleVerdict(summary, detail);
+      if (r?.verdict === 'ask') return ask(tool, input, summary, pageUrl, ctx, { kind: 'rule', reason: `Ask first: ${r.rule.text}` });
+      return allow();
+    }
     const r = await textRuleVerdict(summary, detail);
     if (r?.verdict === 'allow') return allow();
     return ask(tool, input, summary, pageUrl, ctx, { kind: 'command', reason: r?.rule ? `Ask first: ${r.rule.text}` : null });
   }
 
+  if (/^(Write|Edit|MultiEdit|NotebookEdit)$/.test(tool) && SENSITIVE_PATH.test(String(input.file_path || input.notebook_path || '')) && !ctx.preapproved) {
+    return ask(tool, input, summary, pageUrl, ctx, { kind: 'safety', warnings: ['Touches system, sign-in or startup files'] });
+  }
   if (setting('auto_review') !== '1') return allow();
   if (BROWSER_ANY.test(tool) && !BROWSER_WRITE.test(tool)) return allow();
   if (structuredMatch(tool, input, pageUrl, 'allow')) return allow();

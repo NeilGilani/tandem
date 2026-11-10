@@ -204,14 +204,15 @@ export async function renderSettings($main, r) {
       h('div', h('button.btn', { on: { click: async () => { const res = await api('POST', '/api/memory/import', { text: importBox.value }); toast(`Imported ${res.imported} facts into ${res.bot}`); importBox.value = ''; } } }, 'Start Import')),
     ];
   } else if (t === 'computer') {
-    const exec = h('select.select', [['ask', 'Ask every time'], ['always', 'Always allow'], ['never', 'Never allow']].map(([v, l]) => h('option', { value: v, selected: st.local_execution === v }, l)));
+    const exec = h('select.select', [['smart', 'Ask only for risky commands'], ['ask', 'Ask for anything that changes files'], ['always', 'Always allow'], ['never', 'Never allow']].map(([v, l]) => h('option', { value: v, selected: st.local_execution === v }, l)));
     exec.addEventListener('change', () => patch({ local_execution: exec.value }));
     content = [
       h('h2', 'Your computer'),
-      h('div.field', h('label', 'Execution on this computer'), exec, h('div.hint', 'Whether Bots may run commands on this Mac. Ask every time shows an approval card with Allow, Skip and Always allow.')),
+      h('div.field', h('label', 'Execution on this computer'), exec, h('div.hint', 'Whether Bots may run commands on this Mac. With risky commands only, everyday work like reading and writing files or running scripts goes ahead, and anything that deletes files, sends data out, installs software, reads saved passwords or touches system files stops for your OK.')),
       h('h2', 'Bot computers'),
       h('p.hint', 'Each Bot has its own computer: its own browser with its own sign-ins, and its own files folder. A browser starts when its Bot starts work and goes to sleep after 15 minutes idle. Sign-ins are kept. Commands still run on this Mac.'),
-      h('dl.kv', h('dt', 'Shared folder'), h('dd', h('code', st.shared || '')), h('dt', 'Bot folders'), h('dd', h('code', st.workspace || ''))),
+      h('dl.kv', h('dt', 'Shared folder'), h('dd', h('code', st.shared || '')), h('dt', 'Bot folders'), h('dd', h('code', st.workspace || '')),
+        h('dt', 'Python toolbox'), h('dd', { ready: 'Ready: data, charts, Excel, Word, PowerPoint, PDF and scraping packages', building: 'Installing in the background', unavailable: 'Needs Python 3 on this Mac', idle: 'Installs on next start' }[st.toolbox] || '')),
       S.bots.length ? h('div.list', S.bots.map((b) => {
         const c = S.computers[b.id] || {};
         const body = { botId: b.id };

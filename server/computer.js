@@ -83,6 +83,8 @@ export async function ensureBrowser(botId) {
     `--user-data-dir=${m.profile}`,
     '--no-first-run', '--no-default-browser-check',
     '--window-size=1280,860',
+    // The window lives minimized; without these Chrome slows its pages to a crawl.
+    '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows',
     'about:blank',
   ], { detached: true, stdio: 'ignore' });
   child.unref();
@@ -128,11 +130,11 @@ function cdpSession(wsUrl) {
     };
     ws.onerror = () => reject(new Error('CDP connection failed'));
     ws.onopen = () => resolve({
-      send: (method, params = {}) => new Promise((res, rej) => {
+      send: (method, params = {}, timeout = 15000) => new Promise((res, rej) => {
         const id = ++n;
         pending.set(id, { res, rej });
         ws.send(JSON.stringify({ id, method, params }));
-        setTimeout(() => { if (pending.has(id)) { pending.delete(id); rej(new Error(`CDP timeout: ${method}`)); } }, 15000);
+        setTimeout(() => { if (pending.has(id)) { pending.delete(id); rej(new Error(`CDP timeout: ${method}`)); } }, timeout);
       }),
       close: () => ws.close(),
     });
@@ -163,6 +165,80 @@ async function withActivePage(botId, fn) {
   if (!page) return null;
   const s = await cdpSession(page.webSocketDebuggerUrl);
   try { return await fn(s, page); } finally { s.close(); }
+}
+
+// Fetch a URL from inside this Bot's browser, the way the signed-in site itself does:
+// same cookies and session. Runs in a tab already on that site, or a background tab
+// opened for it, so the Bot's own page is never disturbed.
+export async function siteFetch(botId, opts) {
+  try { return await pageFetch(botId, opts); } catch (e) {
+    // Strict sites block requests from their own pages (CSP/CORS); send it with the
+    // browser's cookies and identity instead.
+    if (!/Failed to fetch|NetworkError|Content Security|CORS|sent the browser to/i.test(e.message)) throw e;
+    return cookieFetch(botId, opts);
+  }
+}
+
+async function cookieFetch(botId, { url, method = 'GET', headers = {}, body = null, timeoutMs = 120000 }) {
+  const u = new URL(url);
+  const { cookies: all = [] } = await cdpBrowser(botId, 'Storage.getCookies', {});
+  const jar = all.filter((c) => {
+    const d = c.domain.replace(/^\./, '');
+    return (u.hostname === d || u.hostname.endsWith(`.${d}`)) && u.pathname.startsWith(c.path || '/') && (!c.secure || u.protocol === 'https:');
+  });
+  const ua = (await cdpUp(machine(botId).port))?.['User-Agent'];
+  const r = await fetch(url, {
+    method, redirect: 'follow', signal: AbortSignal.timeout(timeoutMs),
+    headers: { ...(ua ? { 'User-Agent': ua } : {}), ...(jar.length ? { Cookie: jar.map((c) => `${c.name}=${c.value}`).join('; ') } : {}), Accept: '*/*', ...headers },
+    ...(body != null && !/^(GET|HEAD)$/.test(method) ? { body } : {}),
+  });
+  return { status: r.status, url: r.url, type: r.headers.get('content-type') || '', text: await r.text() };
+}
+
+async function pageFetch(botId, { url, method = 'GET', headers = {}, body = null, timeoutMs = 120000 }) {
+  await ensureBrowser(botId);
+  const target = new URL(url);
+  const sameSite = (u) => { try { return new URL(u).origin === target.origin; } catch { return false; } };
+  let page = (await pages(botId)).find((p) => sameSite(p.url));
+  let created = null;
+  if (!page) {
+    created = (await cdpBrowser(botId, 'Target.createTarget', { url: `${target.origin}/`, background: true })).targetId;
+    for (let i = 0; i < 60; i++) {
+      await new Promise((r) => setTimeout(r, 250));
+      page = (await pages(botId)).find((p) => p.id === created);
+      if (page && sameSite(page.url)) break;
+    }
+    if (!page || !sameSite(page.url)) {
+      cdpBrowser(botId, 'Target.closeTarget', { targetId: created }).catch(() => {});
+      throw new Error(`${target.host} sent the browser to ${page ? new URL(page.url).host : 'another page'}. Sign in to it in your browser first.`);
+    }
+  }
+  const s = await cdpSession(page.webSocketDebuggerUrl);
+  try {
+    const init = { method, headers, credentials: 'include', ...(body != null && !/^(GET|HEAD)$/.test(method) ? { body } : {}) };
+    const expression = `(async () => { const r = await fetch(${JSON.stringify(url)}, ${JSON.stringify(init)});
+      return JSON.stringify({ status: r.status, url: r.url, type: r.headers.get('content-type') || '', text: await r.text() }); })()`;
+    const res = await s.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }, timeoutMs);
+    if (res.exceptionDetails) throw new Error(res.exceptionDetails.exception?.description?.split('\n')[0] || 'The request failed in the page');
+    return JSON.parse(res.result.value);
+  } finally {
+    s.close();
+    if (created) cdpBrowser(botId, 'Target.closeTarget', { targetId: created }).catch(() => {});
+  }
+}
+
+// Give a helper's computer a copy of another Bot's browser (sign-ins, cookies, site data),
+// leaving out caches. Skipped while the helper's own browser is running.
+export async function cloneProfile(fromBotId, toBotId) {
+  const from = machine(fromBotId), to = machine(toBotId);
+  if (!fs.existsSync(from.profile) || await cdpUp(to.port)) return false;
+  fs.mkdirSync(to.profile, { recursive: true });
+  const ex = ['Singleton*', 'DevToolsActivePort', 'Cache', 'Code Cache', 'GPUCache', 'ShaderCache', 'GrShaderCache', 'GraphiteDawnCache', 'DawnCache', 'Crashpad', 'CacheStorage', 'ScriptCache', 'component_crx_cache', 'optimization_guide_model_store'];
+  await new Promise((resolve) => {
+    const c = spawn('rsync', ['-a', '--delete', ...ex.flatMap((e) => ['--exclude', e]), `${from.profile}/`, `${to.profile}/`], { stdio: 'ignore' });
+    c.on('close', resolve); c.on('error', resolve);
+  });
+  return true;
 }
 
 async function setWindowState(botId, state) {

@@ -7,10 +7,22 @@ const COLORS = ['#6d5dfc', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#ec4899'
 const SHAPES = ['circle', 'squircle', 'hexagon', 'diamond', 'blob', 'star'];
 
 // ---- Bots -----------------------------------------------------------------------
-export const listBots = () => all('SELECT * FROM bots ORDER BY is_primary DESC, pinned DESC, created');
+export const listBots = () => all('SELECT * FROM bots WHERE helper_of IS NULL ORDER BY is_primary DESC, pinned DESC, created');
+export const listHelpers = (leadId) => leadId
+  ? all('SELECT * FROM bots WHERE helper_of = ? ORDER BY created', leadId)
+  : all('SELECT * FROM bots WHERE helper_of IS NOT NULL ORDER BY created');
+
+// A squad helper: a hidden Bot that works for a lead Bot on its own computer.
+export function createHelper(lead, n) {
+  const id = uid('bot_');
+  run(`INSERT INTO bots (id, name, label, shape, color, hidden, helper_of, notify, drafts, created) VALUES (?,?,?,?,?,1,?,0,?,?)`,
+    id, `${lead.name} helper ${n}`, 'Squad helper', SHAPES[(SHAPES.indexOf(lead.shape) + n) % SHAPES.length], lead.color, lead.id, lead.drafts, now());
+  emit('bots');
+  return getBot(id);
+}
 export const getBot = (id) => get('SELECT * FROM bots WHERE id = ?', id);
 export const findBot = (nameOrId) => getBot(nameOrId)
-  || get('SELECT * FROM bots WHERE lower(name) = lower(?)', String(nameOrId).replace(/^@/, ''));
+  || get('SELECT * FROM bots WHERE helper_of IS NULL AND lower(name) = lower(?)', String(nameOrId).replace(/^@/, ''));
 
 export function createBot({ name, shape, color, label = '', template = null }) {
   if (!name?.trim()) throw new Error('A Bot needs a name');
@@ -49,6 +61,7 @@ export function primaryBot() {
 }
 
 export function deleteBot(id) {
+  for (const h of all('SELECT id FROM bots WHERE helper_of = ?', id)) deleteBot(h.id);
   const chats = all('SELECT * FROM chats').map((c) => parseRow(c, ['bot_ids']));
   for (const c of chats) {
     if (!c.bot_ids.includes(id)) continue;
@@ -91,7 +104,8 @@ export function createGroup({ botIds, name }) {
 }
 
 export const getChat = (id) => parseRow(get('SELECT * FROM chats WHERE id = ?', id), ['bot_ids']);
-export const listChats = () => all('SELECT * FROM chats ORDER BY updated DESC').map((c) => parseRow(c, ['bot_ids']));
+export const listChats = () => all('SELECT * FROM chats ORDER BY updated DESC').map((c) => parseRow(c, ['bot_ids']))
+  .filter((c) => c.kind !== 'dm' || !getBot(c.bot_ids[0])?.helper_of);
 
 export function updateChat(id, { name, botIds }) {
   if (name != null) run('UPDATE chats SET name = ? WHERE id = ?', name, id);

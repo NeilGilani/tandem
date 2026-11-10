@@ -8,6 +8,7 @@ export const S = {
   route: routeFromHash(),
   pending: [],
   missions: [],
+  helpers: [], squads: [], ready: {},
   native: /[?&]app=mac\b/.test(location.search) || !!window.webkit?.messageHandlers?.tandem,
 };
 
@@ -27,10 +28,22 @@ export async function refresh() {
   fire('state');
 }
 
-export const bot = (id) => S.bots.find((b) => b.id === id);
+export const bot = (id) => S.bots.find((b) => b.id === id) || (S.helpers || []).find((b) => b.id === id);
 export const chat = (id) => S.chats.find((c) => c.id === id);
 export const dmOf = (botId) => S.chats.find((c) => c.kind === 'dm' && c.bot_ids[0] === botId);
-export const runsIn = (chatId) => S.runs.filter((r) => r.chatId === chatId);
+export const runsIn = (chatId) => S.runs.filter((r) => r.chatId === chatId && !r.squadId); // squad helpers show in their squad card
+// Instant start: wake a Bot's computer and session while you type to it (at most every 50s).
+const warmed = {};
+export function warmChat(chatId, text = '') {
+  const c = chat(chatId);
+  if (!c || c.kind !== 'dm' || String(text).trim().length < 2 || String(text).startsWith('/')) return;
+  if (Date.now() - (warmed[chatId] || 0) < 50e3 || S.runs.some((r) => r.chatId === chatId)) return;
+  warmed[chatId] = Date.now();
+  api('POST', `/api/chats/${chatId}/warm`).then((r) => { if (r?.ok) { S.ready[chatId] = Date.now(); fire('ready', chatId); } }).catch(() => {});
+}
+export const isReady = (chatId) => Date.now() - (S.ready[chatId] || 0) < 70e3;
+export const squadRuns = (squadId) => S.runs.filter((r) => r.squadId === squadId);
+export const squad = (id) => (S.squads || []).find((x) => x.id === id);
 export const comp = (botId) => S.computers[botId] || { control: 'bot' };
 // The Bot whose computer the current view is about.
 export function focusBot() {
@@ -92,6 +105,11 @@ export function connectEvents() {
     S.missions = (S.missions || []).filter((x) => x.id !== m.id);
     if (!m.deleted) S.missions.unshift(m);
     fire('mission', m);
+  });
+  es.addEventListener('squad', (e) => {
+    const q = JSON.parse(e.data);
+    S.squads = [q, ...(S.squads || []).filter((x) => x.id !== q.id)];
+    fire('squad', q);
   });
   es.addEventListener('usage', (e) => { S.settings.plan = JSON.parse(e.data); fire('usage'); });
   es.addEventListener('notify', (e) => fire('notify', JSON.parse(e.data)));

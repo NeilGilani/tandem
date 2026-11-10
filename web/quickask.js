@@ -1,7 +1,7 @@
 // Quick Ask: a Spotlight-style box to hand any Bot a task in seconds.
 // ⌘J in the app; ⌥Space anywhere on your Mac in the Mac app.
 import { api, h, avatar, toast } from './lib.js';
-import { S, bot, dmOf, go } from './store.js';
+import { S, bot, dmOf, go, warmChat } from './store.js';
 
 let open = null;
 const lastKey = 'tandem.qa.bot';
@@ -35,7 +35,7 @@ export function openQuickAsk({ onSent } = {}) {
     try { await api('POST', `/api/chats/${c.id}/messages`, { text }); } catch (e) { return toast(e.message, 'bad'); }
     if (stay) toast(`Sent to ${bot(pick).name}`); else go(`#/chat/${c.id}`);
   };
-  ta.addEventListener('input', autosize);
+  ta.addEventListener('input', () => { autosize(); warmChat(dmOf(pick)?.id, ta.value); });
   ta.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') { e.preventDefault(); close(); }
     else if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(e.metaKey || e.ctrlKey); }

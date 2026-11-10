@@ -1,7 +1,7 @@
 // Home: a greeting, ask any Bot, everything waiting on you, who's working right now
 // (with live screens), your Bots, and what got done today.
 import { api, h, avatar, icon, toast, menu, fileUrl } from './lib.js';
-import { S, bot, chat, dmOf, runsIn, go, comp } from './store.js';
+import { S, bot, chat, dmOf, runsIn, go, comp, warmChat } from './store.js';
 import { inboxRows, openInboxAt } from './inbox.js';
 
 let askBot = null;
@@ -52,7 +52,7 @@ function paint($main, renderCard, planBars) {
   const ab = bot(askBot);
   const ta = h('textarea', { rows: 1, placeholder: ab ? `Ask ${ab.name} to…` : 'Create a Bot to get started' });
   const autosize = () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 200) + 'px'; };
-  ta.addEventListener('input', autosize);
+  ta.addEventListener('input', () => { autosize(); if (ab) warmChat(dmOf(ab.id)?.id, ta.value); });
   const send = async () => {
     const text = ta.value.trim();
     if (!text || !ab) return;

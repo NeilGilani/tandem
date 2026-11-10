@@ -1,6 +1,6 @@
 // Tandem web app: sidebar, conversations, cards, composer, palette, shortcuts.
 import { api, h, md, avatar, groupAvatar, userAvatar, icon, toast, modal, confirm, menu, time, fileUrl, SHAPES, COLORS, logo, esc, loadLogos } from './lib.js';
-import { S, on, refresh, bot, chat, dmOf, runsIn, go, parseRoute, toggleComputer, connectEvents, comp } from './store.js';
+import { S, on, refresh, bot, chat, dmOf, runsIn, squadRuns, squad, warmChat, isReady, go, parseRoute, toggleComputer, connectEvents, comp } from './store.js';
 import { renderComputer } from './computer.js';
 import { openBotDrawer } from './drawer.js';
 import { renderApps, renderSkills, renderSettings, renderTemplates, renderActivity, planBars } from './pages.js';
@@ -277,7 +277,9 @@ async function loadMessages(chatId) {
 function stepsBlock(m) {
   const steps = m.meta.steps;
   const tools = steps.filter((x) => x.k === 'tool').length;
-  const label = `Worked for ${dur(m.meta.duration || 0)}${tools ? ` · ${tools} step${tools === 1 ? '' : 's'}` : ''}`;
+  const sites = m.meta.sites?.length || 0, files = m.meta.files?.length || 0;
+  const label = [`Worked for ${dur(m.meta.duration || 0)}`, tools && `${tools} step${tools === 1 ? '' : 's'}`,
+    sites && `${sites} site${sites === 1 ? '' : 's'}`, files && `${files} file${files === 1 ? '' : 's'}`].filter(Boolean).join(' · ');
   return h('details.steps', h('summary', label),
     h('ol', steps.map((x) => h(`li.${x.k}`, x.k === 'text' ? { html: md(x.t) } : x.t))));
 }
@@ -318,6 +320,7 @@ function renderBotParts(m, isGroup, showWho) {
   if (m.meta?.browser && m.meta?.shot && m.text) parts.push(computerCard({ botId: m.bot_id, state: 'done', shot: fileUrl(m.meta.shot), text: null }));
   if (m.meta?.handoff && m.author === 'bot') parts.push(h('div.who', `From ${b?.name || 'a Bot'}`));
   if (m.text) parts.push(h('div.bubble', { html: md(m.text) }));
+  if (m.meta?.files?.length) parts.push(fileChips(m.meta.files));
   if (m.card) parts.push(renderCard(m));
   if (m.meta?.suggestions?.length && isLatestBot(m)) parts.push(h('div.suggest', m.meta.suggestions.map((t) => h('button.sug', { on: { click: () => sendQuick(m.chat_id, t) } }, t))));
   if (Object.keys(m.reactions || {}).length) parts.push(h('div.reactions', Object.keys(m.reactions).map((e) => h('button', { on: { click: () => api('POST', `/api/messages/${m.id}/react`, { emoji: e }) } }, e))));
@@ -433,6 +436,59 @@ function computerCard({ botId, state, shot, text, live = false }) {
           h('button.btn', { on: { click: () => { S.focusBot = botId; toggleComputer(true); } } }, state === 'working' ? 'Watch' : 'Open computer')]));
 }
 
+// A squad: helpers working on parts of one job at the same time, each on its own computer.
+function squadCard(q) {
+  if (!q) return h('div.approval-done', h('span', 'Squad'));
+  const runs = squadRuns(q.id);
+  const done = q.parts.filter((p) => p.status === 'done').length;
+  const live = q.status === 'working';
+  const working = q.parts.filter((p) => p.status === 'working').length;
+  const sub = live ? `${working} working at once · ${done} of ${q.parts.length} done`
+    : q.status === 'merging' ? `All ${q.parts.length} parts back · ${bot(q.leadId)?.name || 'The lead'} is checking and merging`
+    : q.status === 'done' ? (() => {
+      const work = q.parts.reduce((n, p) => n + (p.ended && p.started ? p.ended - p.started : 0), 0), wall = (q.finished || Date.now()) - q.created;
+      return h('span', `${q.parts.length} parts done in parallel · `, h('b.sq-win', `${dur(work)} of work in ${dur(wall)}`));
+    })() : 'Stopped';
+  const tiles = q.parts.map((p) => {
+    const r = runs.find((x) => x.botId === p.botId);
+    const hb = bot(p.botId);
+    let screen;
+    if (p.status === 'working') {
+      const img = h('img', { alt: '', src: liveShots[p.botId] || '', hidden: !liveShots[p.botId] });
+      img.dataset.live = p.botId;
+      screen = h('div.sq-screen', img, !liveShots[p.botId] && h('div.empty', 'Starting its computer'));
+    } else {
+      const ic = { done: 'check', failed: 'x', stopped: 'x' }[p.status];
+      screen = h(`div.sq-screen.idle.${p.status}${p.ended && Date.now() - p.ended < 2500 ? '.just' : ''}${p.shot ? '.has-shot' : ''}`,
+        p.shot && h('img', { src: fileUrl(p.shot), alt: '' }), ic ? h('span.sq-badge', icon(ic)) : h('span', 'Waiting for a free helper'));
+    }
+    const line = p.status === 'working' ? (r?.status || 'Working')
+      : p.status === 'done' ? `Done in ${dur(p.ended - p.started)}` : p.status === 'failed' ? 'Ran into a problem' : p.status === 'stopped' ? 'Stopped' : 'Queued';
+    const open = p.status === 'done' && p.file ? () => window.open(fileUrl(p.file), '_blank') : null;
+    return h(`div.sq-tile.is-${p.status}`, { title: p.report || '', ...(open ? { on: { click: open }, role: 'button' } : {}) },
+      screen,
+      h('div.sq-meta', hb ? avatar(hb, 18, { busy: p.status === 'working' }) : null,
+        h('div.sq-t', h('b', p.title), h('span', p.status === 'working' && p.started ? [line, h('i', { 'data-since': p.started }, ` · ${dur(Date.now() - p.started)}`)] : open ? `${line} · Open` : line))));
+  });
+  return h(`div.card.squad-card${live ? '.sq-live' : ''}`, { 'data-squad': q.id },
+    h('div.card-h', 'Squad', h(`span.pill${live || q.status === 'merging' ? '.warn.spin' : q.status === 'done' ? '.good' : ''}`, live ? 'Working' : q.status === 'merging' ? 'Merging' : q.status === 'done' ? 'Done' : 'Stopped')),
+    h('div.card-b', h('div.card-title', q.goal), h('div.sq-sub', sub, live && h('i', { 'data-since': q.created }, ` · ${dur(Date.now() - q.created)}`))),
+    h('div.sq-bar', h('i', { style: { width: `${Math.round((done / q.parts.length) * 100)}%` } })),
+    h('div.sq-grid', { style: { gridTemplateColumns: `repeat(${q.parts.length <= 4 ? q.parts.length : q.parts.length <= 6 ? 3 : 4}, minmax(0, 1fr))` } }, tiles),
+    live ? h('div.card-actions', h('button.btn.ghost', { on: { click: async () => { if (await confirm('Stop the squad? Parts already finished are kept.', { danger: true, label: 'Stop squad' })) api('POST', `/api/squads/${q.id}/stop`); } } }, 'Stop squad'))
+      : h('div', { style: { height: '12px' } }));
+}
+function repaintSquad(id) {
+  const q = squad(id);
+  document.querySelectorAll(`.squad-card[data-squad="${id}"]`).forEach((el) => el.replaceWith(squadCard(q)));
+}
+on('squad', (q) => repaintSquad(q.id));
+let readyPainter = null;
+on('ready', () => readyPainter?.());
+on('run', (r) => { if (r.squadId) repaintSquad(r.squadId); });
+// Running clocks on squad cards.
+setInterval(() => document.querySelectorAll('[data-since]').forEach((el) => { el.textContent = ` · ${dur(Date.now() - Number(el.dataset.since))}`; }), 1000);
+
 // The moment you hit send, the Bot visibly picks it up (replaced by the real run).
 export function optimisticRun(chatId) {
   const c = chat(chatId);
@@ -449,17 +505,17 @@ const liveShots = {};
 setInterval(async () => {
   if (document.hidden) return;
   const ids = [...new Set([...document.querySelectorAll('img[data-live]')].map((i) => i.dataset.live))];
-  for (const id of ids) {
+  await Promise.all(ids.map(async (id) => {
     try {
       const r = await fetch(`/api/computer/screenshot?bot=${encodeURIComponent(id)}`, { cache: 'no-store' });
-      if (!r.ok) continue;
+      if (!r.ok) return;
       const url = URL.createObjectURL(await r.blob());
       const old = liveShots[id];
       liveShots[id] = url;
       document.querySelectorAll(`img[data-live="${id}"]`).forEach((i) => { i.src = url; i.hidden = false; i.parentElement.querySelector('.empty')?.remove(); });
       if (old) setTimeout(() => URL.revokeObjectURL(old), 2000);
     } catch {}
-  }
+  }));
 }, 1500);
 
 let $messages, $working, $composer, $teach, currentChatId = null;
@@ -559,24 +615,74 @@ export function teachTask(botId, chatId) {
 }
 
 // ---------- Viewer ------------------------------------------------------------------------------
+// What a Bot made this turn, as chips you can open right here.
+const FILE_ICON = { image: 'image', sheet: 'table', doc: 'file', slides: 'slides', page: 'page', code: 'code', file: 'file' };
+const size = (n) => n < 1024 ? `${n} B` : n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`;
+function fileChips(files) {
+  return h('div.deliverables', files.map((f) => h(`button.deliv.k-${f.kind}`, { title: f.path, on: { click: () => openViewer({ title: f.name, ref: f.path }) } },
+    f.kind === 'image' ? h('span.deliv-thumb', h('img', { src: fileUrl(f.path), alt: '', loading: 'lazy' })) : h('span.deliv-ic', icon(FILE_ICON[f.kind] || 'file')),
+    h('span.deliv-t', h('b', f.name), h('span', [f.kind === 'sheet' ? 'Spreadsheet' : f.kind === 'image' ? 'Image' : f.kind === 'doc' ? 'Document' : f.kind === 'slides' ? 'Slides' : f.kind === 'page' ? 'Web page' : f.kind === 'code' ? 'Code' : 'File', size(f.size || 0)].join(' · '))))));
+}
+
+// CSV with quoted fields.
+function parseCsv(text, sep = ',') {
+  const rows = []; let row = [], cur = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (q) { if (ch === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += ch; }
+    else if (ch === '"') q = true;
+    else if (ch === sep) { row.push(cur); cur = ''; }
+    else if (ch === '\n' || ch === '\r') { if (ch === '\r' && text[i + 1] === '\n') i++; row.push(cur); rows.push(row); row = []; cur = ''; }
+    else cur += ch;
+  }
+  if (cur || row.length) { row.push(cur); rows.push(row); }
+  return rows.filter((r) => r.some((c) => c !== ''));
+}
+
+// A preview panel that slides in from the right: Markdown, tables, JSON, code, images, PDFs and pages.
+let $viewer = null;
 export function openViewer({ title, ref, kind }) {
   const isUrl = /^https?:/.test(ref);
   if (isUrl) return window.open(ref, '_blank', 'noopener');
+  $viewer?.remove();
   const url = fileUrl(ref);
-  let body;
-  if (kind === 'image' || /\.(png|jpe?g|gif|webp|svg)$/i.test(ref)) body = h('div.img-wrap', h('img', { src: url, alt: title }));
-  else if (/\.(md|txt|csv|json|log)$/i.test(ref)) {
-    body = h('div.md', h('div', 'Loading…'));
-    fetch(url).then((r) => r.text()).then((t) => { body.firstChild.innerHTML = /\.md$/i.test(ref) ? md(t) : `<pre style="white-space:pre-wrap">${esc(t)}</pre>`; });
-  } else body = h('iframe', { src: url, title });
-  const v = h('div.viewer',
-    h('div.viewer-h', h('span.t', title || ref.split('/').pop()),
-      h('a.btn', { href: fileUrl(ref, true) }, icon('download'), 'Download'),
-      h('button.icon-btn', { title: 'Close', on: { click: () => v.remove() } }, icon('x'))),
+  const name = title || ref.split('/').pop();
+  const ext = (ref.match(/\.([a-z0-9]+)$/i)?.[1] || '').toLowerCase();
+  let body, text = null;
+  const meta = h('span.viewer-meta');
+  if (kind === 'image' || /^(png|jpe?g|gif|webp|svg)$/.test(ext)) body = h('div.img-wrap', h('img', { src: url, alt: name }));
+  else if (/^(md|markdown|txt|log|csv|tsv|json|js|ts|py|sh|css|yml|yaml|xml)$/.test(ext)) {
+    body = h('div.v-scroll', h('div.v-loading', 'Opening…'));
+    fetch(url).then((r) => r.text()).then((t) => {
+      text = t;
+      let inner;
+      if (ext === 'md' || ext === 'markdown') inner = h('div.md.v-doc', { html: md(t) });
+      else if (ext === 'csv' || ext === 'tsv') {
+        const rows = parseCsv(t, ext === 'tsv' ? '\t' : ',');
+        const [head = [], ...rest] = rows;
+        meta.textContent = `${rest.length.toLocaleString()} row${rest.length === 1 ? '' : 's'} · ${head.length} column${head.length === 1 ? '' : 's'}`;
+        const num = (v) => /^\s*[-$€£]?\s?[\d,]+(\.\d+)?\s*%?\s*$/.test(v);
+        inner = h('div.v-table', h('table', h('thead', h('tr', h('th.rn', ''), head.map((c) => h('th', c)))),
+          h('tbody', rest.slice(0, 2000).map((r, i) => h('tr', h('td.rn', String(i + 1)), head.map((_, j) => h(`td${num(r[j] || '') ? '.num' : ''}`, r[j] ?? '')))))));
+      } else if (ext === 'json') { let pretty = t; try { pretty = JSON.stringify(JSON.parse(t), null, 2); } catch {} inner = h('pre.v-code', pretty); }
+      else inner = h('pre.v-code', t);
+      body.replaceChildren(inner);
+    }).catch(() => body.replaceChildren(h('div.v-loading', 'Couldn’t open this file.')));
+  } else if (/^(pdf|html?)$/.test(ext)) body = h('iframe', { src: url, title: name });
+  else body = h('div.v-none', h('span.deliv-ic.big', icon(/^(xlsx?|numbers)$/.test(ext) ? 'table' : /^(pptx?|key)$/.test(ext) ? 'slides' : 'file')),
+    h('b', name), h('p', 'Preview isn’t available for this kind of file.'), h('a.btn.primary', { href: fileUrl(ref, true) }, icon('download'), 'Download'));
+  const close = () => { $viewer?.classList.add('out'); const v = $viewer; $viewer = null; setTimeout(() => v?.remove(), 180); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape' && !document.querySelector('.modal-bg')) close(); };
+  $viewer = h('div.viewer.panel',
+    h('div.viewer-h', h('span.deliv-ic', icon(/^(csv|tsv|xlsx?)$/.test(ext) ? 'table' : /^(png|jpe?g|gif|webp|svg)$/.test(ext) ? 'image' : /^(json|js|ts|py|sh|css)$/.test(ext) ? 'code' : 'file')),
+      h('div.viewer-title', h('span.t', name), meta),
+      h('button.icon-btn', { title: 'Copy contents', on: { click: async () => { if (text == null) return; await navigator.clipboard.writeText(text); toast('Copied'); } } }, icon('copy')),
+      h('a.icon-btn', { title: 'Open in a new tab', href: url, target: '_blank' }, icon('open')),
+      h('a.icon-btn', { title: 'Download', href: fileUrl(ref, true) }, icon('download')),
+      h('button.icon-btn', { title: 'Close (Esc)', on: { click: close } }, icon('x'))),
     body);
-  document.body.append(v);
-  const esc2 = (e) => { if (e.key === 'Escape') { v.remove(); document.removeEventListener('keydown', esc2); } };
-  document.addEventListener('keydown', esc2);
+  document.body.append($viewer);
+  document.addEventListener('keydown', onKey);
 }
 
 // ---------- Cards -------------------------------------------------------------------------------
@@ -688,6 +794,8 @@ function renderCard(m) {
           : [h('button.btn.primary', { on: { click: () => { cardAction(m, {}); } } }, c.note ? 'Reopen' : 'Authorize'),
             h('button.btn.ghost', { on: { click: () => cardAction(m, { dismiss: true }) } }, 'Not now')]));
   }
+
+  if (c.type === 'squad') return squadCard(squad(c.squadId) || c.squad);
 
   if (c.type === 'takeover') {
     if (!pending) return h('div.approval-done', h('span', `You finished: ${c.reason}`));
@@ -817,7 +925,7 @@ function renderComposer() {
     ta.value = v.slice(0, mentionState.start) + it.insert + v.slice(ta.selectionStart);
     pop.hidden = true; mentionState = null; ta.focus(); paintAction();
   }
-  ta.addEventListener('input', () => { autosize(); updateMention(); paintAction(); try { localStorage.setItem(draftKey, ta.value); } catch {} });
+  ta.addEventListener('input', () => { autosize(); updateMention(); paintAction(); if (c) warmChat(c.id, ta.value); try { localStorage.setItem(draftKey, ta.value); } catch {} });
   ta.addEventListener('keydown', (e) => {
     if (mentionState && !pop.hidden) {
       if (e.key === 'ArrowDown') { e.preventDefault(); mentionState.sel = (mentionState.sel + 1) % mentionState.items.length; return drawPop(); }
@@ -870,7 +978,12 @@ function renderComposer() {
     replyTo && h('div.replying', `Replying to: ${(replyTo.text || replyTo.card?.summary || 'message').slice(0, 70)}`, h('button', { on: { click: () => { replyTo = null; renderComposer(); } } }, 'Cancel')),
     pendingFiles.map((f, i) => h('span.attach', icon('clip'), f.name, h('button.icon-btn', { style: { width: '18px', height: '18px' }, on: { click: () => { pendingFiles.splice(i, 1); renderComposer(); } } }, icon('x'))))) : null;
 
-  $composer.replaceChildren(pop, h('div.composer-box', top, h('div.composer-row', plus, fileInput, ta, action)));
+  // Shown once the Bot's session is warm: your message starts the instant you send it.
+  const ready = h('span.ready-chip', { title: 'Ready: work starts the moment you send' }, icon('bolt'), 'Ready');
+  const paintReady = () => ready.classList.toggle('on', !!c && isReady(c.id) && !!ta.value.trim());
+  ta.addEventListener('input', paintReady);
+  readyPainter = paintReady;
+  $composer.replaceChildren(pop, h('div.composer-box', top, h('div.composer-row', plus, fileInput, ta, ready, action)));
   autosize();
   paintAction();
   if (innerWidth > 820) setTimeout(() => ta.focus(), 0);
