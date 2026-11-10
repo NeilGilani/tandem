@@ -2,6 +2,7 @@
 // today's shifts, the work board, standups and end-of-day reports, and timesheets.
 import { api, h, avatar, userAvatar, icon, toast, modal, menu, md } from './lib.js';
 import { S, bot, dmOf, go, on, toggleComputer } from './store.js';
+import { openViewer } from './app.js';
 
 let data = null;
 const DAY_START = 7, DAY_END = 19;
@@ -27,7 +28,8 @@ function presence(botId) {
 const fmtH = (h) => (h === 12 ? '12 pm' : h > 12 ? `${h - 12} pm` : `${h} am`);
 
 export async function renderCompany($main) {
-  try { data = await api('GET', '/api/company'); } catch (e) { $main.replaceChildren(h('div.page', h('p.hint', e.message))); return; }
+  let off = { goals: [], meetings: [], channels: [], handbook: '' };
+  try { [data, off] = await Promise.all([api('GET', '/api/company'), api('GET', '/api/office')]); } catch (e) { $main.replaceChildren(h('div.page', h('p.hint', e.message))); return; }
   const byId = Object.fromEntries(data.org.map((o) => [o.id, o]));
   const roots = data.org.filter((o) => !o.bossId || !byId[o.bossId]);
 
@@ -75,9 +77,42 @@ export async function renderCompany($main) {
 
   // ---- Standups -------------------------------------------------------------------------
   const reports = data.reports.length ? h('div.reports', data.reports.slice().reverse().map((r) => h('div.report',
-    avatar(bot(r.bot_id), 26), h('div', h('div.report-h', h('b', bot(r.bot_id)?.name || 'A Bot'), h('span', r.kind === 'eod' ? 'End of day' : 'Standup'), h('em', new Date(r.created).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }))),
+    avatar(bot(r.bot_id), 26), h('div', h('div.report-h', h('b', bot(r.bot_id)?.name || 'A Bot'), h('span', r.kind === 'eod' ? 'End of day' : r.kind === 'review' ? 'Monthly review' : 'Standup'), h('em', new Date(r.created).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }))),
       h('div.md', { html: md(r.text) })))))
     : h('p.hint', 'Standups appear here as each Bot starts its shift, and end-of-day reports as it finishes.');
+
+  // ---- Goals ------------------------------------------------------------------------------
+  const kids = (pid) => off.goals.filter((g) => (g.parent_id || null) === pid);
+  const goalRow = (g, depth = 0) => {
+    const pct = Math.min(100, Math.round((g.current / g.target) * 100));
+    const late = g.due && g.status !== 'done' && new Date(`${g.due}T23:59`) < new Date();
+    return [h('button.goal-row', { style: { paddingLeft: `${12 + depth * 22}px` }, on: { click: () => goalModal(g, off.goals) } },
+      h('div.goal-h', h('span', g.title), h('em', `${g.current} of ${g.target}${g.unit ? ` ${g.unit}` : ''}`)),
+      h('div.goal-bar', h('i', { style: { width: `${pct}%` } })),
+      h('div.goal-m', g.owner_id ? bot(g.owner_id)?.name : 'Company', g.due && h('span', { class: late ? 'late' : '' }, ` · ${late ? 'late, ' : ''}due ${g.due}`), g.notes?.length ? ` · ${g.notes.at(-1).text.slice(0, 90)}` : '')),
+      ...kids(g.id).flatMap((k) => goalRow(k, depth + 1))];
+  };
+  const goalsBlock = h('div.goals', off.goals.length ? kids(null).flatMap((g) => goalRow(g)) : h('p.hint', 'Set your company\'s big goals. Department heads break them down and owners keep the numbers current.'),
+    h('div', h('button.btn.sm', { on: { click: () => goalModal(null, off.goals) } }, icon('plus'), 'Add a goal')));
+
+  // ---- Meetings -----------------------------------------------------------------------------
+  const meetingsBlock = h('div.meetings', off.meetings.map((m) => h('div.meeting',
+    h('div.meeting-h', h('b', m.title), m.status === 'running' ? h('span.live-pill', 'In session') : h('span.hint', m.schedule_text || 'One-off')),
+    h('div.meeting-p', m.attendees.map((id) => avatar(bot(id), 20)), h('span.hint', `Chaired by ${bot(m.chair_id)?.name || '?'}`)),
+    m.last_minutes && h('details.minutes', h('summary', `Last minutes, ${m.last_run ? new Date(m.last_run).toLocaleDateString([], { month: 'short', day: 'numeric' }) : ''}`), h('div.md', { html: md(m.last_minutes) })),
+    h('div.hstack', { style: { gap: '6px' } },
+      m.status !== 'running' && h('button.btn.sm', { on: { click: () => api('POST', `/api/office/meetings/${m.id}/run`).then(() => { toast(`${m.title} is starting`); go(`#/chat/${m.chat_id}`); }) } }, 'Start now'),
+      h('button.btn.ghost.sm', { on: { click: () => go(`#/chat/${m.chat_id}`) } }, m.status === 'running' ? 'Join the room' : 'Open the room'),
+      h('button.btn.ghost.sm', { style: { marginLeft: 'auto' }, on: { click: () => api('DELETE', `/api/office/meetings/${m.id}`).then(() => renderCompany(document.getElementById('main'))) } }, 'Cancel meeting')))),
+    h('div', h('button.btn.sm', { on: { click: meetingModal } }, icon('plus'), 'Schedule a meeting')));
+
+  // ---- Handbook -----------------------------------------------------------------------------
+  const sections = [...(off.handbook || '').matchAll(/^## (.+)$/gm)].map((x) => x[1]);
+  const handbookBlock = h('div.handbook',
+    h('p.hint', off.handbook ? `${sections.length} section${sections.length === 1 ? '' : 's'}: ${sections.join(', ') || 'none yet'}. Every Bot reads it and follows it over anything else.` : 'No handbook yet. Write the facts and rules every Bot should follow, or ask your chief of staff to draft it.'),
+    h('div.hstack', { style: { gap: '6px' } },
+      off.handbook && h('button.btn.sm', { on: { click: () => openViewer({ title: 'Company handbook', ref: off.handbookPath }) } }, icon('book'), 'Read it'),
+      h('button.btn.sm', { on: { click: () => handbookModal(sections) } }, icon('plus'), off.handbook ? 'Edit a section' : 'Start the handbook')));
 
   // ---- Timesheet ------------------------------------------------------------------------
   const ts = data.timesheet;
@@ -93,10 +128,14 @@ export async function renderCompany($main) {
   $main.replaceChildren(h('div.page.company', h('div.page-in',
     h('div.co-head', h('div', name, h('p.lede', `${data.org.length} employees · ${on} on shift · ${working} working right now · ${totalH >= 1 ? `${totalH.toFixed(0)} hours` : `${ts.reduce((n, t) => n + t.minutes, 0)} minutes`} worked this week`)),
       h('button.btn.primary', { on: { click: () => assignModal() } }, icon('plus'), 'Assign work')),
+    h('section.co-sec', h('div.group-h', 'Goals'), goalsBlock),
     h('section.co-sec', h('div.group-h', 'Org chart'), tree),
     h('section.co-sec', h('div.group-h', 'Today'), timeline, h('div.tl-key', h('span', h('i.k-shift'), 'Shift'), h('span', h('i.k-work'), 'Worked'), h('span', h('i.k-now'), 'Now'))),
     h('section.co-sec', h('div.group-h', 'Work board'), board),
-    h('section.co-sec', h('div.group-h', 'Standups and end-of-day reports'), reports),
+    h('section.co-sec', h('div.group-h', 'Meetings'), meetingsBlock),
+    h('section.co-sec', h('div.group-h', 'Standups, reports and reviews'), reports,
+      h('div', { style: { marginTop: '10px' } }, h('button.btn.ghost.sm', { title: 'Each boss reviews its reports now instead of on the first weekday of the month', on: { click: () => api('POST', '/api/office/reviews').then((r) => toast(r.bosses ? `${r.bosses} boss${r.bosses === 1 ? ' is' : 'es are'} writing reviews` : 'No bosses with reports yet')) } }, 'Run monthly reviews now'))),
+    h('section.co-sec', h('div.group-h', 'Handbook'), handbookBlock),
     h('section.co-sec', h('div.group-h', 'Timesheet, last 7 days'), sheet),
     h('label.co-toggle', h('input', { type: 'checkbox', checked: S.settings.draft_reviews !== false, on: { change: (e) => api('PATCH', '/api/company', { draft_reviews: e.target.checked }) } }),
       h('span', h('b', 'Bosses review drafts first'), h('span.hint', 'A Bot\'s outgoing drafts go to its boss before your inbox. Bots reporting to you come straight to you.'))))));
@@ -165,3 +204,56 @@ function roleModal(o) {
 
 let t;
 for (const evt of ['company', 'run', 'bots']) on(evt, () => { if (S.route.name === 'company') { clearTimeout(t); t = setTimeout(() => renderCompany(document.getElementById('main')), 400); } });
+
+function goalModal(g, all) {
+  const title = h('input.input', { value: g?.title || '', placeholder: 'First paying ranch' });
+  const target = h('input.input', { type: 'number', value: g?.target ?? '', placeholder: '1', style: { width: '110px' } });
+  const current = h('input.input', { type: 'number', value: g?.current ?? 0, style: { width: '110px' } });
+  const unit = h('input.input', { value: g?.unit || '', placeholder: 'ranches', style: { width: '140px' } });
+  const due = h('input.input', { type: 'date', value: g?.due || '', style: { width: 'auto' } });
+  const owner = h('select.select', [h('option', { value: '' }, 'The company'), ...S.bots.map((b) => h('option', { value: b.id, selected: g?.owner_id === b.id }, `${b.name}${b.title ? `, ${b.title}` : ''}`))]);
+  const parent = h('select.select', [h('option', { value: '' }, 'Nothing (top level)'), ...all.filter((x) => x.id !== g?.id).map((x) => h('option', { value: x.id, selected: g?.parent_id === x.id }, x.title))]);
+  const how = h('input.input', { value: g?.how || '', placeholder: 'Signed agreements in the pipeline file' });
+  modal({ title: g ? 'Goal' : 'Add a goal', body: [
+    h('div.field', h('label', 'Goal'), title),
+    h('div.hstack', { style: { gap: '10px', flexWrap: 'wrap' } }, h('div.field', h('label', 'Now'), current), h('div.field', h('label', 'Target'), target), h('div.field', h('label', 'Unit'), unit), h('div.field', h('label', 'Due'), due)),
+    h('div.field', h('label', 'Owner'), owner), h('div.field', h('label', 'Rolls up to'), parent), h('div.field', h('label', 'How it\'s measured'), how),
+    g?.notes?.length ? h('div.notes', g.notes.slice().reverse().slice(0, 6).map((n) => h('div.note', h('div.hint', `${new Date(n.at).toLocaleDateString([], { month: 'short', day: 'numeric' })} · ${n.by === 'user' ? 'You' : bot(n.by)?.name || ''}`), h('div', n.text)))) : null,
+  ], actions: [{ label: 'Cancel' }, { label: g ? 'Save' : 'Add goal', primary: true, onClick: async () => {
+    const body = { title: title.value.trim(), target: Number(target.value), current: Number(current.value) || 0, unit: unit.value.trim(), due: due.value || null, ownerId: owner.value || null, parentId: parent.value || null, how: how.value.trim() };
+    try { g ? await api('PATCH', `/api/office/goals/${g.id}`, body) : await api('POST', '/api/office/goals', body); } catch (e) { toast(e.message, 'bad'); return false; }
+    renderCompany(document.getElementById('main'));
+  } }] });
+}
+
+function meetingModal() {
+  const title = h('input.input', { placeholder: 'Weekly pipeline review' });
+  const chair = h('select.select', S.bots.map((b) => h('option', { value: b.id, selected: /chief/i.test(b.title || '') }, `${b.name}${b.title ? `, ${b.title}` : ''}`)));
+  const people = h('div.pick-list', S.bots.map((b) => h('label.list-row', h('input', { type: 'checkbox', value: b.id }), avatar(b, 20), h('span.grow', `${b.name}${b.title ? `, ${b.title}` : ''}`))));
+  const when = h('input.input', { placeholder: 'Mondays at 9:30am (leave empty for once, now)' });
+  const agenda = h('textarea.textarea', { rows: 3, placeholder: 'Pipeline by stage, what moved, blockers, decide this week\'s priorities' });
+  modal({ title: 'Schedule a meeting', wide: true, body: [h('div.field', h('label', 'Meeting'), title), h('div.field', h('label', 'Chaired by'), chair), h('div.field', h('label', 'Attendees'), people), h('div.field', h('label', 'When'), when), h('div.field', h('label', 'Agenda'), agenda)],
+    actions: [{ label: 'Cancel' }, { label: 'Schedule', primary: true, onClick: async () => {
+      const attendees = [...people.querySelectorAll('input:checked')].map((x) => x.value);
+      if (!title.value.trim()) { toast('Name the meeting', 'bad'); return false; }
+      try {
+        const m = await api('POST', '/api/office/meetings', { title: title.value.trim(), chairId: chair.value, attendees, when: when.value.trim(), agenda: agenda.value.trim() });
+        if (!when.value.trim()) await api('POST', `/api/office/meetings/${m.id}/run`);
+        toast(when.value.trim() ? `Scheduled: ${m.schedule_text || when.value}` : `${m.title} is starting`);
+      } catch (e) { toast(e.message, 'bad'); return false; }
+      renderCompany(document.getElementById('main'));
+    } }] });
+}
+
+function handbookModal(sections) {
+  const section = h('input.input', { placeholder: 'Pricing', list: 'hb-sections' });
+  const list = h('datalist', { id: 'hb-sections' }, sections.map((x) => h('option', { value: x })));
+  const text = h('textarea.textarea', { rows: 10, placeholder: 'Write it the way you\'d brief a new hire.' });
+  modal({ title: 'Edit the handbook', wide: true, body: [h('div.field', h('label', 'Section'), section, list), h('div.field', h('label', 'Text (replaces the section)'), text)],
+    actions: [{ label: 'Cancel' }, { label: 'Save', primary: true, onClick: async () => {
+      if (!section.value.trim() || !text.value.trim()) { toast('Name the section and write it', 'bad'); return false; }
+      await api('PUT', '/api/office/handbook', { section: section.value.trim(), text: text.value.trim() });
+      toast('Handbook updated. Every Bot follows it from its next turn.');
+      renderCompany(document.getElementById('main'));
+    } }] });
+}

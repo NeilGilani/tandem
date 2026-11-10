@@ -23,6 +23,7 @@ import * as squads from './squads.js';
 import * as laptop from './laptop.js';
 import * as accounts from './accounts.js';
 import * as company from './company.js';
+import * as office from './office.js';
 import * as missions from './missions.js';
 import { spawn as spawnProc } from 'node:child_process';
 import { CATEGORIES } from './catalog.js';
@@ -35,6 +36,7 @@ routines.attach(engine);
 missions.attach(engine);
 squads.attach(engine);
 company.attach(engine);
+office.attach(engine);
 
 const WEB = path.join(ROOT, 'web');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json',
@@ -218,7 +220,19 @@ route('GET', '/api/company', () => ({ name: company.companyName(), org: company.
   shifts: missions.list().filter((m) => ['active', 'waiting', 'blocked'].includes(m.status)).map((m) => ({ botId: m.bot_id, hours: m.hours, title: m.title, status: m.status })),
   worked: all("SELECT bot_id, created, ended FROM actions WHERE kind = 'run' AND created > ?", Date.now() - 864e5) }));
 route('PATCH', '/api/company', async (req) => { const b = await readJson(req); if (b.name !== undefined) setSetting('company_name', String(b.name).slice(0, 60)); if (b.draft_reviews !== undefined) setSetting('draft_reviews', b.draft_reviews ? '1' : '0'); emit('company'); return { ok: true }; });
-route('PATCH', '/api/company/bots/:id', async (req, res, p) => company.setRole(p.id, await readJson(req)));
+route('PATCH', '/api/company/bots/:id', async (req, res, p) => { const b = company.setRole(p.id, await readJson(req)); office.ensureChannels(); return b; });
+route('GET', '/api/office', () => ({
+  channels: office.channels().map((c) => ({ id: c.id, name: c.name, members: c.bot_ids, last: office.recent(c.id, 6) })),
+  meetings: office.meetings(), goals: office.goals(), handbook: office.handbook(), handbookPath: office.handbookPath(),
+}));
+route('POST', '/api/office/channels', () => office.ensureChannels().map((c) => c.name));
+route('POST', '/api/office/meetings', async (req) => { const b = await readJson(req); return office.schedule({ title: b.title, chairId: b.chairId, attendees: b.attendees || [], agenda: b.agenda, when: b.when, rounds: b.rounds }); });
+route('POST', '/api/office/meetings/:id/run', (req, res, p) => { office.runMeeting(p.id); return { ok: true }; });
+route('DELETE', '/api/office/meetings/:id', (req, res, p) => { office.removeMeeting(p.id); return { ok: true }; });
+route('POST', '/api/office/goals', async (req) => office.setGoal({ ...(await readJson(req)), by: 'user' }));
+route('PATCH', '/api/office/goals/:id', async (req, res, p) => { const b = await readJson(req); return b.current !== undefined && Object.keys(b).length <= 2 ? office.updateGoal(p.id, { current: b.current, note: b.note, by: 'user' }) : office.setGoal({ ...b, id: p.id, by: 'user' }); });
+route('PUT', '/api/office/handbook', async (req) => { const b = await readJson(req); return { ok: office.updateHandbook('user', b.section, b.text) }; });
+route('POST', '/api/office/reviews', () => ({ bosses: office.runReviews() }));
 route('POST', '/api/company/tasks', async (req) => { const b = await readJson(req); return company.assign({ title: b.title, detail: b.detail, ownerId: b.ownerId, due: b.due, assignedBy: 'user' }); });
 route('PATCH', '/api/company/tasks/:id', async (req, res, p) => { const b = await readJson(req); return b.verdict ? company.review(p.id, { verdict: b.verdict, notes: b.notes, by: 'user' }) : company.update(p.id, { status: b.status, note: b.note, by: 'user' }); });
 route('GET', '/api/accounts', () => accounts.list().map((a) => ({ ...a, source: chats.getBot(a.source_bot)?.name || null })));
@@ -485,6 +499,9 @@ missions.recover();
 toolbox.ensure(); // shared Python for Bots, built once in the background
 squads.recover();
 setInterval(() => company.tickDraftReviews(), 5 * 60e3);
+setInterval(() => office.tickMeetings(), 30e3);
+setInterval(() => office.tickReviews(), 30 * 60e3);
+if (company.org().some((o) => o.reports.length)) office.ensureChannels();
 // Company sign-ins: every Bot's computer gets them when it wakes; keep them fresh.
 accounts.onRefresh((botId) => connectors.refresh(botId));
 computer.onBrowserStart((botId) => accounts.applyAll(botId));

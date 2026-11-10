@@ -7,7 +7,7 @@ export function pickModel(text = '', { origin = 'chat', attachments = 0 } = {}) 
   const t = String(text);
   if (LIGHT.test(t.trim())) return 'haiku';
   if (origin === 'mission') return 'opus'; // long unattended work gets the strongest model
-  if (origin === 'routine' || origin === 'handoff' || origin === 'squad') return HEAVY.test(t) ? 'opus' : 'sonnet';
+  if (origin === 'routine' || origin === 'handoff' || origin === 'squad' || origin === 'meeting') return HEAVY.test(t) ? 'opus' : 'sonnet';
   if (HEAVY.test(t) || t.length > 1200 || attachments > 2) return 'opus';
   return 'sonnet';
 }

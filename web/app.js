@@ -12,6 +12,7 @@ import { openQuickAsk } from './quickask.js';
 import { renderMissions, newMission, missionCard, openMission, progress as missionProgress } from './missions.js';
 import { renderInbox } from './inbox.js';
 import { renderCompany } from './company.js';
+import { renderOffice } from './office.js';
 
 const $sidebar = document.getElementById('sidebar');
 const $main = document.getElementById('main');
@@ -71,6 +72,7 @@ function chatRow(c) {
   const last = c.last;
   const unread = !active && last && last.author !== 'user' && last.created > getSeen(c.id);
   const name = isGroup ? groupTitle(c) : b.name;
+  const room = isGroup && /^(#|Meeting: )/.test(c.name || '');
   if (!isGroup && renaming === b.id) {
     const input = h('input', { value: b.name, on: {
       keydown: async (e) => {
@@ -91,7 +93,7 @@ function chatRow(c) {
       contextmenu: (e) => { e.preventDefault(); isGroup ? groupMenu(c, e.clientX, e.clientY) : botMenu(b, e.clientX, e.clientY); },
     },
   },
-  isGroup ? groupAvatar(c.bot_ids.map(bot).filter(Boolean), 34) : avatar(b, 34, { blink: !!run }),
+  room ? h('span.room-ic', c.name.startsWith('#') ? '#' : icon('users')) : isGroup ? groupAvatar(c.bot_ids.map(bot).filter(Boolean), 34) : avatar(b, 34, { blink: !!run }),
   h('div.t',
     h('div.n', h('b', name), h('time', run ? '' : last ? shortTime(last.created) : '')),
     h(`div.p${run ? '.working' : ''}`, preview)),
@@ -149,12 +151,15 @@ function sidebarOrder() {
   const primary = visible.filter((c) => bot(c.bot_ids[0]).is_primary);
   const pinned = visible.filter((c) => { const b = bot(c.bot_ids[0]); return b.pinned && !b.is_primary; }).sort((a, b) => recency(b) - recency(a));
   const rest = visible.filter((c) => { const b = bot(c.bot_ids[0]); return !b.pinned && !b.is_primary; });
-  const groups = S.chats.filter((c) => c.kind === 'group').filter(match);
+  const isRoom = (c) => /^(#|Meeting: )/.test(c.name || '');
+  const rooms = S.chats.filter((c) => c.kind === 'group' && isRoom(c)).filter(match)
+    .sort((a, b) => (a.name.startsWith('#') === b.name.startsWith('#') ? (a.name === '#general' ? -1 : b.name === '#general' ? 1 : a.name.localeCompare(b.name)) : a.name.startsWith('#') ? -1 : 1));
+  const groups = S.chats.filter((c) => c.kind === 'group' && !isRoom(c)).filter(match);
   const sections = [...new Set(rest.map((c) => bot(c.bot_ids[0]).section).filter(Boolean))];
   const loose = [...rest.filter((c) => !bot(c.bot_ids[0]).section), ...groups].sort((a, b) => recency(b) - recency(a));
-  return { primary, pinned, sections: sections.map((s) => [s, rest.filter((c) => bot(c.bot_ids[0]).section === s).sort((a, b) => recency(b) - recency(a))]), loose, hidden };
+  return { primary, pinned, sections: sections.map((s) => [s, rest.filter((c) => bot(c.bot_ids[0]).section === s).sort((a, b) => recency(b) - recency(a))]), loose, hidden, rooms };
 }
-const flatOrder = () => { const o = sidebarOrder(); return [...o.primary, ...o.pinned, ...o.sections.flatMap(([, l]) => l), ...o.loose]; };
+const flatOrder = () => { const o = sidebarOrder(); return [...o.rooms, ...o.primary, ...o.pinned, ...o.sections.flatMap(([, l]) => l), ...o.loose]; };
 
 function renderSidebar() {
   const o = sidebarOrder();
@@ -183,11 +188,13 @@ function renderSidebar() {
         S.pending.length ? h('span.badge', String(S.pending.length)) : null),
       h(`button.nav-row${S.route.name === 'company' ? '.active' : ''}`, { on: { click: () => go('#/company') } }, icon('users'), h('span', S.settings.company_name || 'Company'),
         S.runs.filter((r) => !r.squadId).length ? h('span.count-soft', `${S.runs.filter((r) => !r.squadId).length} working`) : null),
+      h(`button.nav-row${S.route.name === 'office' ? '.active' : ''}`, { on: { click: () => go('#/office') } }, icon('monitor'), h('span', 'Office')),
       h(`button.nav-row${S.route.name === 'missions' ? '.active' : ''}`, { on: { click: () => go('#/missions') } }, icon('target'), h('span', 'Missions'),
         (S.missions || []).filter((m) => m.status === 'blocked').length ? h('span.badge', String(S.missions.filter((m) => m.status === 'blocked').length))
           : (S.missions || []).filter((m) => ['active', 'waiting'].includes(m.status)).length ? h('span.count-soft', String(S.missions.filter((m) => ['active', 'waiting'].includes(m.status)).length)) : null),
       h(`button.nav-row${S.route.name === 'activity' ? '.active' : ''}`, { on: { click: () => go('#/activity') } }, icon('activity'), h('span', 'Activity')),
       S.bots.length === 0 && h('div.hint', { style: { padding: '8px 10px' } }, 'No Bots yet.'),
+      o.rooms.length > 0 && [h('div.sb-label', 'Channels'), o.rooms.map(chatRow)],
       o.primary.map(chatRow),
       o.pinned.length > 0 && [h('div.sb-label', 'Pinned'), o.pinned.map(chatRow)],
       o.sections.map(([name, list]) => [h('div.sb-label', name), list.map(chatRow)]),
@@ -1036,6 +1043,7 @@ export function openPalette() {
     { label: 'Home', run: () => go('#/home') },
     { label: 'Needs you', run: () => go('#/inbox') },
     { label: 'Company', run: () => go('#/company') },
+    { label: 'Office floor', run: () => go('#/office') },
     { label: 'Missions', run: () => go('#/missions') },
     { label: 'Start a mission', run: () => newMission() },
     { label: 'Skills', run: () => go('#/skills') },
@@ -1110,6 +1118,7 @@ function render() {
     else if (r.name === 'activity') renderActivity($main, r);
     else if (r.name === 'missions') renderMissions($main);
     else if (r.name === 'company') renderCompany($main);
+    else if (r.name === 'office') renderOffice($main);
     else if (r.name === 'inbox') renderInbox($main, { renderCard });
     else renderHome();
   }

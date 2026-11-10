@@ -8,6 +8,7 @@ import * as skills from './skills.js';
 import * as connectors from './connectors.js';
 import * as toolbox from './toolbox.js';
 import * as company from './company.js';
+import * as office from './office.js';
 
 const laptopFolders = (botId) => {
   let extra = []; try { extra = JSON.parse(setting('laptop_folders') || '[]'); } catch {}
@@ -38,6 +39,8 @@ for facts about them, like name or time zone) without asking. Log notable finish
 Never store logins, cards or contact details in memory — those belong in the Vault.
 
 ${company.promptBlock(bot)}
+
+${office.promptBlock(bot)}
 
 ## Your computer
 ${computer.onLaptop(bot.id) ? `You have your own laptop: a Linux (Debian) computer with a desktop, nobody else's. Other Bots have their own.

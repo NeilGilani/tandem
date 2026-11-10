@@ -872,3 +872,71 @@ button.org-node:hover { border-color: var(--line-2); transform: translateY(-1px)
 .card .card-b .review-note { margin: 8px 0 0; }
 
 .team-acct small.stale { color: var(--warn); white-space: normal; }
+
+/* Channels and meeting rooms in the sidebar */
+.room-ic { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--side); border: 1px solid var(--line); color: var(--text-2); font-weight: 600; font-size: 16px; flex: none; }
+.room-ic svg { width: 16px; height: 16px; }
+
+/* ---------- Office floor ---------- */
+.office .page-in { max-width: 1180px; }
+.office-grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 24px; margin-top: 18px; align-items: start; }
+@media (max-width: 960px) { .office-grid { grid-template-columns: 1fr; } }
+.floor { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
+.desk { text-align: left; border: 1px solid var(--line); border-radius: 16px; padding: 10px; background: var(--bg); display: grid; gap: 8px; transition: border-color .2s, transform .2s var(--spring), box-shadow .2s; }
+.desk:hover { transform: translateY(-2px); box-shadow: 0 14px 34px -22px rgba(0,0,0,.45); border-color: var(--line-2); }
+.monitor { aspect-ratio: 16 / 10; border-radius: 10px; overflow: hidden; background: #1f2a3d; position: relative; box-shadow: inset 0 0 0 1px rgba(255,255,255,.06); }
+.monitor img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
+.monitor-off { position: absolute; inset: 0; display: grid; place-items: center; color: rgba(255,255,255,.35); }
+.monitor-off svg { width: 22px; height: 22px; }
+.d-away .monitor { background: var(--side); }
+.d-away .monitor-off { color: var(--text-3); }
+.d-meeting .monitor { background: color-mix(in srgb, #8b5cf6 22%, #1f2a3d); }
+.desk-who { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.desk-who > div { display: grid; min-width: 0; flex: 1; }
+.desk-who b { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.desk-who span { font-size: 11.5px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.desk-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--text-3); flex: none; }
+.d-working .desk-dot { background: var(--good); animation: pulse 1.6s infinite; }
+.d-idle .desk-dot { background: var(--blue, #3b82f6); }
+.d-blocked .desk-dot { background: var(--warn); }
+.d-meeting .desk-dot { background: #8b5cf6; }
+.desk-line { font-size: 12px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.d-working .desk-line { color: var(--good); }
+.d-blocked .desk-line { color: var(--warn); }
+.office aside { display: grid; gap: 10px; }
+.office aside .group-h { margin-top: 6px; }
+.mroom { border: 1px solid var(--line); border-radius: 14px; padding: 12px; display: grid; gap: 8px; }
+.mroom.on { border-color: color-mix(in srgb, #8b5cf6 45%, var(--line)); background: color-mix(in srgb, #8b5cf6 6%, var(--bg)); }
+.mroom-h { display: flex; align-items: center; gap: 8px; font-size: 13.5px; }
+.mroom-h b { font-weight: 600; }
+.mroom-h .hint { margin-left: auto; }
+.live-pill { margin-left: auto; font-size: 11px; font-weight: 600; color: #7c3aed; background: color-mix(in srgb, #8b5cf6 14%, transparent); border-radius: 99px; padding: 2px 8px; }
+.mroom-people { display: flex; gap: 4px; }
+.chatter { display: grid; gap: 8px; }
+.chan { text-align: left; border: 1px solid var(--line); border-radius: 12px; padding: 10px; display: grid; gap: 4px; background: var(--bg); }
+.chan:hover { border-color: var(--line-2); }
+.chan-h { display: flex; justify-content: space-between; font-size: 13px; }
+.chan-h b { font-weight: 600; } .chan-h span { color: var(--text-3); font-size: 11.5px; }
+.chan-last { font-size: 12px; color: var(--text-2); display: grid; gap: 2px; }
+.chan-last div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.score { display: grid; gap: 10px; }
+.goal-h { display: flex; justify-content: space-between; gap: 8px; font-size: 12.5px; }
+.goal-h em { font-style: normal; color: var(--text-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.goal-bar { height: 6px; border-radius: 3px; background: var(--side); overflow: hidden; margin-top: 4px; }
+.goal-bar i { display: block; height: 100%; background: var(--text); border-radius: 3px; transition: width .6s var(--ease); }
+.goal-m { font-size: 11px; color: var(--text-3); margin-top: 3px; }
+
+/* Company: goals, meetings, handbook */
+.goals { display: grid; gap: 6px; }
+.goal-row { text-align: left; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: var(--bg); display: grid; gap: 2px; }
+.goal-row:hover { border-color: var(--line-2); }
+.goal-m .late { color: var(--bad); }
+.meetings { display: grid; gap: 10px; }
+.meeting { border: 1px solid var(--line); border-radius: 14px; padding: 12px; display: grid; gap: 8px; }
+.meeting-h { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.meeting-h b { font-weight: 600; } .meeting-h .hint { margin-left: auto; }
+.meeting-p { display: flex; align-items: center; gap: 4px; }
+.meeting-p .hint { margin-left: 8px; }
+.minutes summary { cursor: pointer; font-size: 12.5px; color: var(--text-2); }
+.minutes .md { font-size: 13px; margin-top: 6px; }
+.pick-list { display: grid; gap: 2px; max-height: 240px; overflow: auto; }

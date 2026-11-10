@@ -20,6 +20,7 @@ import * as squads from './squads.js';
 import * as laptop from './laptop.js';
 import * as accounts from './accounts.js';
 import * as company from './company.js';
+import * as office from './office.js';
 
 let engine = null;
 export const attach = (e) => { engine = e; };
@@ -71,6 +72,19 @@ export const DEFS = [
   ['mission_checkpoint', 'End a mission work session. Record what you did and decide what happens next: continue right away, wait until a time, blocked on the user, or done.',
     S({ note: str('What you did this session and where you left off (your future self reads this)'), next: { type: 'string', enum: ['continue', 'wait', 'blocked', 'done'] },
       wait_until: str('ISO date-time to wake up, when next="wait"'), wait_reason: str('What you will do when you wake up'), blocked_reason: str('What you need from the user, when next="blocked"'), summary: str('Final summary of results, when next="done"') }, ['note', 'next'])],
+  ['post_to_channel', 'Post in a team channel (like #general or your department channel): updates, wins, questions for the team, blockers. @Name a teammate to get their reply in the channel.',
+    S({ channel: str('Channel name, e.g. #sales'), text: str('The message') }, ['channel', 'text'])],
+  ['read_channel', 'Read the latest messages in a team channel.', S({ channel: str('Channel name'), limit: num('How many (default 20)') }, ['channel'])],
+  ['list_goals', 'See the goals scoreboard: company, department and personal goals with their current numbers.', S({})],
+  ['update_goal', 'Update the current number on a goal you own, from a real source, with a short note on what changed.', S({ id: str('Goal id'), current: num('The new current value'), note: str('What changed and where the number comes from') }, ['id', 'current'])],
+  ['set_goal', 'Leads only: create or change a goal for your team (title, target number, unit, due date, owner, and how it is measured).',
+    S({ id: str('Goal id to change (omit to create)'), title: str(''), target: num(''), unit: str('e.g. ranches, intros, grants'), due: str('YYYY-MM-DD'), owner: str('Bot name who owns it'), parent_id: str('The bigger goal it rolls up to'), how: str('How the number is measured') })],
+  ['schedule_meeting', 'Leads only: set up a recurring meeting (or a one-off with no schedule) that you chair. Attendees talk in turns and you close it with decisions and assignments.',
+    S({ title: str(''), attendees: { type: 'array', items: { type: 'string' }, description: 'Bot names' }, when: str('e.g. "Mondays at 9:30am" (leave empty to run it now)'), agenda: str('') }, ['title', 'attendees'])],
+  ['write_review', "Your monthly review of one of your direct reports: a 1 to 5 rating, what went well, what to improve, and one concrete coaching change (saved to their memory).",
+    S({ bot: str('Report name'), rating: num('1 to 5'), went_well: str(''), improve: str(''), coaching: str('One specific change to how they work') }, ['bot', 'rating', 'coaching'])],
+  ['update_handbook', 'Leads only: write or replace a section of the company handbook, the source of truth every Bot follows (pricing, product facts, outreach style, rules).',
+    S({ section: str('Section name, e.g. Pricing'), text: str('The full section, in Markdown') }, ['section', 'text'])],
   ['assign_task', 'Give one of your direct reports an assignment (you are their boss). They are woken to work on it and submit it back to you for review.',
     S({ to: str('Bot name'), title: str('Short title of the assignment'), detail: str('Exactly what to do and what to hand back'), due: str('Due date, e.g. 2026-11-14 (optional)') }, ['to', 'title'])],
   ['list_tasks', 'List your open assignments, and the ones waiting for your review.', S({})],
@@ -276,6 +290,20 @@ export async function call(tool, args = {}, ctx) {
 
   switch (tool) {
     case 'site_fetch': return siteFetch(args, ctx);
+    case 'post_to_channel': office.post(ctx.botId, args.channel, args.text || args.message, Number(ctx.depth || 0)); return `Posted in ${args.channel}.`;
+    case 'read_channel': { const c = office.channelByName(args.channel); if (!c) return `No channel ${args.channel}. Channels: ${office.channels().map((x) => x.name).join(', ')}`; return office.recent(c.id, Math.min(Number(args.limit) || 20, 60)) || '(no messages yet)'; }
+    case 'list_goals': return office.scoreboard() || 'No goals yet.';
+    case 'update_goal': { const g = office.getGoal(args.id); if (!g) throw new Error('No such goal. Use list_goals for ids.'); return office.updateGoal(args.id, { current: args.current, note: args.note, by: ctx.botId }); }
+    case 'set_goal': return office.setGoal({ id: args.id, title: args.title, target: args.target, unit: args.unit, due: args.due, how: args.how, parentId: args.parent_id || null, ownerId: args.owner ? chats.findBot(args.owner)?.id || null : null, by: ctx.botId });
+    case 'schedule_meeting': {
+      if (!/chief|head|lead|manager/i.test(chats.getBot(ctx.botId)?.title || '') && !company.reportsOf(ctx.botId).length) throw new Error('Only leads set up meetings. Ask your boss.');
+      const ids = (args.attendees || []).map((n) => chats.findBot(n)?.id).filter(Boolean);
+      const mt = await office.schedule({ title: args.title, chairId: ctx.botId, attendees: ids, agenda: args.agenda, when: args.when });
+      if (!args.when) setTimeout(() => office.runMeeting(mt.id), 1500);
+      return mt.schedule_text ? `Scheduled "${mt.title}" ${mt.schedule_text}.` : `"${mt.title}" starts now in its meeting room.`;
+    }
+    case 'write_review': return office.writeReview(ctx.botId, args);
+    case 'update_handbook': return office.updateHandbook(ctx.botId, args.section, args.text);
     case 'assign_task': return company.assign({ title: args.title, detail: args.detail, ownerId: args.to, assignedBy: ctx.botId, due: args.due });
     case 'list_tasks': return { mine: company.tasks({ ownerId: ctx.botId, open: true }).map(({ id, title, status, due, notes }) => ({ id, title, status, due, lastNote: notes?.at(-1)?.text })),
       toReview: company.tasks({ open: true }).filter((t) => t.reviewer_id === ctx.botId && t.status === 'review').map(({ id, title, owner_id, result }) => ({ id, title, from: chats.getBot(owner_id)?.name, result })) };

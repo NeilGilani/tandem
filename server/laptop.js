@@ -46,7 +46,8 @@ export function prepare() {
       if (!fs.existsSync(BIN('colima')) || !fs.existsSync(BIN('docker'))) { setState('missing', 'Install Colima and Docker: brew install colima docker'); return false; }
       // The VM shares Tandem's data folder plus the Mac folders you chose for the laptops.
       const want = vmFolders();
-      const missing = want.filter((f) => !mountedFolders().includes(f));
+      const shared = mountedFolders();
+      const missing = want.filter((f) => !shared.some((m) => f === m || f.startsWith(`${m}/`)));
       let up = true;
       try { await text(['info', '--format', '{{.ServerVersion}}'], { timeout: 8000 }); } catch { up = false; }
       if (up && missing.length && fs.existsSync(configFile())) {
@@ -89,7 +90,7 @@ const vmFolders = () => [...new Set([PATHS.data, ...extraFolders()])];
 // A folder change takes effect the next time laptops are prepared (the VM restarts once).
 export function foldersChanged() { if (state.status === 'ready') state = { status: 'unknown', detail: '' }; }
 
-export const enabled = () => { const m = setting('computer_mode'); return m === 'laptop' || (m !== 'mac' && installed()); };
+export const enabled = () => { const m = process.env.TANDEM_COMPUTER_MODE || setting('computer_mode'); return m === 'laptop' || (m !== 'mac' && installed()); };
 
 // Mac folders every laptop can open, at the same path as on the Mac.
 function folders(workspace) {
