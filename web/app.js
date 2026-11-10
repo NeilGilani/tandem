@@ -10,6 +10,7 @@ import { renderHome as renderHomePage, refreshHome } from './home.js';
 import { cheer } from './alive.js';
 import { openQuickAsk } from './quickask.js';
 import { renderMissions, newMission, missionCard, openMission, progress as missionProgress } from './missions.js';
+import { renderInbox } from './inbox.js';
 
 const $sidebar = document.getElementById('sidebar');
 const $main = document.getElementById('main');
@@ -51,6 +52,15 @@ let showHidden = false;
 let sideQuery = '';
 let compact = (() => { try { return localStorage.getItem('tandem.compact') === '1'; } catch { return false; } })();
 
+// Groups named after their members get a readable title: "Alice + 4".
+export function groupTitle(c) {
+  const members = c.bot_ids.map(bot).filter(Boolean);
+  const auto = !c.name || c.name === members.map((b) => b.name).join(', ') || c.name.split(', ').length === members.length;
+  if (!auto) return c.name;
+  if (members.length <= 2) return members.map((b) => b.name).join(' & ');
+  return `${members[0]?.name} + ${members.length - 1}`;
+}
+
 function chatRow(c) {
   const isGroup = c.kind === 'group';
   const b = isGroup ? null : bot(c.bot_ids[0]);
@@ -59,7 +69,7 @@ function chatRow(c) {
   const run = runsIn(c.id)[0];
   const last = c.last;
   const unread = !active && last && last.author !== 'user' && last.created > getSeen(c.id);
-  const name = isGroup ? c.name : b.name;
+  const name = isGroup ? groupTitle(c) : b.name;
   if (!isGroup && renaming === b.id) {
     const input = h('input', { value: b.name, on: {
       keydown: async (e) => {
@@ -167,7 +177,8 @@ function renderSidebar() {
       ]) } }, icon('plus'))),
     h('label.sb-search', icon('search'), search, h('kbd', '⌘K')),
     h('div.sb-scroll',
-      h(`button.nav-row${S.route.name === 'home' ? '.active' : ''}`, { on: { click: () => go('#/home') } }, icon('home'), h('span', 'Home'),
+      h(`button.nav-row${S.route.name === 'home' ? '.active' : ''}`, { on: { click: () => go('#/home') } }, icon('home'), h('span', 'Home')),
+      h(`button.nav-row${S.route.name === 'inbox' ? '.active' : ''}`, { on: { click: () => go('#/inbox') } }, icon('inbox'), h('span', 'Needs you'),
         S.pending.length ? h('span.badge', String(S.pending.length)) : null),
       h(`button.nav-row${S.route.name === 'missions' ? '.active' : ''}`, { on: { click: () => go('#/missions') } }, icon('target'), h('span', 'Missions'),
         (S.missions || []).filter((m) => m.status === 'blocked').length ? h('span.badge', String(S.missions.filter((m) => m.status === 'blocked').length))
@@ -474,7 +485,7 @@ function paintWorking() {
 function emptyChat(chatId) {
   const c = chat(chatId);
   if (c?.kind === 'group') return h('div.empty', { style: { padding: '80px 0' } }, h('div', groupAvatar(c.bot_ids.map(bot).filter(Boolean), 64),
-    h('h2', c.name), h('p', 'Write normally and the Bots decide who responds, or @mention one to give it ownership.')));
+    h('h2', groupTitle(c)), h('p', 'Write normally and the Bots decide who responds, or @mention one to give it ownership.')));
   const b = bot(c?.bot_ids[0]);
   const starters = ['Your job is to triage my inbox every morning and draft replies. Remember that.', "Every weekday at 8am, send me a brief of today's meetings.", 'Research the 10 best-funded startups in my space and put them in a sheet.'];
   return h('div.empty', { style: { padding: '72px 0 24px' } }, h('div', avatar(b, 76, { blink: true }), h('h2', b?.name),
@@ -504,7 +515,8 @@ function renderChat(chatId) {
   const head = h('div.chat-head',
     h('button.icon-btn.back-btn', { on: { click: () => go('#/') } }, icon('back')),
     h('button.title', { title: 'Conversation details (⌘⇧I)', on: { click: () => isGroup ? newGroup(c) : openBotDrawer(b.id) } },
-      isGroup ? groupAvatar(members, 24) : avatar(b, 24), h('span', isGroup ? c.name : b?.name)),
+      isGroup ? groupAvatar(members, 24) : avatar(b, 24), h('span', isGroup ? groupTitle(c) : b?.name),
+      isGroup ? h('span.hint', { style: { fontWeight: 400, marginLeft: '2px' } }, `${members.length} Bots`) : null),
     !isGroup && missionPill(b.id),
     h('div.spacer'),
     !isGroup && h('button.icon-btn', { title: 'Start voice chat', on: { click: () => startCall(chatId) } }, icon('phone')),
@@ -739,7 +751,7 @@ function renderComposer() {
   if (!$composer || !currentChatId) return;
   const c = chat(currentChatId);
   const isGroup = c?.kind === 'group';
-  const ta = h('textarea', { rows: 1, placeholder: isGroup ? `Message ${c.name}` : `Message ${bot(c?.bot_ids[0])?.name || ''}, or type / for commands` });
+  const ta = h('textarea', { rows: 1, placeholder: isGroup ? 'Message the group, @mention a Bot to give it the task' : `Message ${bot(c?.bot_ids[0])?.name || ''}, or type / for commands` });
   const draftKey = `tandem.draft.${currentChatId}`;
   try { ta.value = localStorage.getItem(draftKey) || ''; } catch {}
   const pop = h('div.mention-pop', { hidden: true });
@@ -893,6 +905,7 @@ export function openPalette() {
     { label: 'New group chat', sub: '⌘⇧N', run: () => newGroup() },
     { label: 'Connect apps', sub: '⌘⇧M', run: () => go('#/apps') },
     { label: 'Home', run: () => go('#/home') },
+    { label: 'Needs you', run: () => go('#/inbox') },
     { label: 'Missions', run: () => go('#/missions') },
     { label: 'Start a mission', run: () => newMission() },
     { label: 'Skills', run: () => go('#/skills') },
@@ -966,6 +979,7 @@ function render() {
     else if (r.name === 'templates') renderTemplates($main, r);
     else if (r.name === 'activity') renderActivity($main, r);
     else if (r.name === 'missions') renderMissions($main);
+    else if (r.name === 'inbox') renderInbox($main, { renderCard });
     else renderHome();
   }
   renderComputer();

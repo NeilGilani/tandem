@@ -2,6 +2,7 @@
 // (with live screens), your Bots, and what got done today.
 import { api, h, avatar, icon, toast, menu, fileUrl } from './lib.js';
 import { S, bot, chat, dmOf, runsIn, go, comp } from './store.js';
+import { inboxRows, openInboxAt } from './inbox.js';
 
 let askBot = null;
 let depsRef = null;
@@ -69,12 +70,10 @@ function paint($main, renderCard, planBars) {
   const section = (title, count, ...body) => h('section.home-sec', h('div.home-h', h('h2', title), count != null ? h('span.count', String(count)) : null), ...body);
 
   const pendingBlock = pending.length
-    ? h('div.needs', pending.slice(0, 12).map((m) => {
-      const b = bot(m.bot_id);
-      return h('div.need', { 'data-id': m.id },
-        h('div.need-h', avatar(b, 22), h('b', b.name), h('span.hint', ago(m.created)), h('button.btn.ghost.sm', { on: { click: () => go(`#/chat/${m.chat_id}`) } }, 'Open chat')),
-        renderCard(m));
-    }))
+    ? h('div', { style: { display: 'grid', gap: '8px' } },
+      inboxRows(pending, { max: 5, onOpen: (m) => openInboxAt(m.id) }),
+      pending.length > 0 && h('button.btn', { style: { justifySelf: 'start' }, on: { click: () => openInboxAt(pending[0].id) } },
+        pending.length > 5 ? `Review all ${pending.length}` : 'Review one by one'))
     : h('div.calm', h('div.calm-ic', icon('check')), h('div', h('b', 'Nothing needs you'), h('div.hint', 'Approvals, drafts and questions from your Bots show up here.')));
 
   const workingBlock = working.length

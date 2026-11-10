@@ -132,19 +132,22 @@ export function checkpoint(botId, { note, next = 'continue', wait_until, wait_re
 }
 
 // ---- Sessions --------------------------------------------------------------------------------
+function hourParts(t, tz) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', weekday: 'short', hour: 'numeric' }).formatToParts(new Date(t)).map((x) => [x.type, x.value]));
+  return { hour: Number(p.hour), wd: p.weekday };
+}
+// Working hours: "any", "weekdays 9-18" or "daily 8-22". Returns when the next window opens.
 function inHours(m) {
   if (!m.hours || m.hours === 'any') return { ok: true };
-  // "weekdays 9-18" or "daily 8-22"
   const mm = String(m.hours).match(/(weekdays|daily)\s+(\d{1,2})-(\d{1,2})/);
   if (!mm) return { ok: true };
-  const tz = timezone();
-  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', weekday: 'short', hour: 'numeric' }).formatToParts(new Date()).map((x) => [x.type, x.value]));
-  const hour = Number(p.hour), wd = p.weekday;
-  const workday = mm[1] === 'daily' || !['Sat', 'Sun'].includes(wd);
-  const ok = workday && hour >= Number(mm[2]) && hour < Number(mm[3]);
-  if (ok) return { ok: true };
-  // Next start of working hours (checked hourly until then).
-  return { ok: false, retry: now() + (60 - new Date().getMinutes()) * 60e3 + 30e3 };
+  const tz = timezone(), start = Number(mm[2]), end = Number(mm[3]);
+  const open = (t) => { const p = hourParts(t, tz); return (mm[1] === 'daily' || !['Sat', 'Sun'].includes(p.wd)) && p.hour >= start && p.hour < end; };
+  if (open(now())) return { ok: true };
+  // Walk forward hour by hour (at most 8 days) to the start of the next window.
+  let t = Math.ceil(now() / 3600e3) * 3600e3;
+  for (let i = 0; i < 24 * 8 && !open(t); i++) t += 3600e3;
+  return { ok: false, retry: t + 30e3 };
 }
 
 function brief(m, { fresh }) {
@@ -175,7 +178,7 @@ export async function runSession(m) {
   const wait = activity.routinesShouldWait();
   if (wait) return save(m.id, { status: 'waiting', next_wake: wait.until || now() + 30 * 60e3, wake_reason: `${wait.reason}. Resumes when it resets.` });
   const hours = inHours(m);
-  if (!hours.ok) return save(m.id, { status: 'waiting', next_wake: hours.retry, wake_reason: 'Outside working hours' });
+  if (!hours.ok) return save(m.id, { status: 'waiting', next_wake: hours.retry, wake_reason: 'Waiting for working hours' });
   const today = new Date().toLocaleDateString('en-CA', { timeZone: timezone() });
   const sessionsToday = m.day === today ? m.sessions_today : 0;
   if (sessionsToday >= m.daily_budget) {
