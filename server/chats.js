@@ -85,6 +85,16 @@ export function deleteBot(id) {
 }
 
 // ---- Chats ------------------------------------------------------------------------
+// Each Bot's back office: a hidden chat where Bot-to-Bot work happens (handoffs, assignments,
+// replies), so your chats only hold what's meant for you.
+export function officeFor(botId) {
+  const existing = all("SELECT * FROM chats WHERE kind = 'office'").map((c) => parseRow(c, ['bot_ids'])).find((c) => c.bot_ids[0] === botId);
+  if (existing) return existing;
+  const id = uid('chat_');
+  run('INSERT INTO chats (id, kind, name, bot_ids, created, updated) VALUES (?,?,?,?,?,?)', id, 'office', 'Back office', JSON.stringify([botId]), now(), now());
+  return getChat(id);
+}
+
 export function dmFor(botId) {
   const existing = all("SELECT * FROM chats WHERE kind = 'dm'").map((c) => parseRow(c, ['bot_ids'])).find((c) => c.bot_ids[0] === botId);
   if (existing) return existing;
@@ -104,7 +114,7 @@ export function createGroup({ botIds, name }) {
 }
 
 export const getChat = (id) => parseRow(get('SELECT * FROM chats WHERE id = ?', id), ['bot_ids']);
-export const listChats = () => all('SELECT * FROM chats ORDER BY updated DESC').map((c) => parseRow(c, ['bot_ids']))
+export const listChats = () => all("SELECT * FROM chats WHERE kind != 'office' ORDER BY updated DESC").map((c) => parseRow(c, ['bot_ids']))
   .filter((c) => c.kind !== 'dm' || !getBot(c.bot_ids[0])?.helper_of);
 
 export function updateChat(id, { name, botIds }) {

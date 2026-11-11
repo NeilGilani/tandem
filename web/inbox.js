@@ -1,7 +1,7 @@
 // Needs you: everything waiting on you across all Bots. Compact rows with one-click
 // actions on Home, and a focused triage view (#/inbox) with keyboard shortcuts that
 // moves to the next item on its own.
-import { api, h, avatar, icon, toast } from './lib.js';
+import { api, h, avatar, icon, toast, confirm } from './lib.js';
 import { S, bot, go, on } from './store.js';
 
 const KIND = {
@@ -93,6 +93,7 @@ export function renderInbox($main, d) {
     return;
   }
 
+  const drafts = items.filter((m) => m.card.type === 'draft');
   const list = h('div.tri-list', items.map((m) => {
     const k = KIND[m.card.type] || { ic: 'sparkle' };
     return h(`button.tri-item${m.id === sel ? '.on' : ''}`, { 'data-id': m.id, on: { click: () => { sel = m.id; renderInbox($root, deps); } } },
@@ -108,6 +109,11 @@ export function renderInbox($main, d) {
 
   $main.replaceChildren(h('div.page.tri',
     h('div.tri-top', h('h1', 'Needs you'), h('span.count', `${items.length} left`), h('span', { style: { flex: 1 } }),
+      drafts.length > 1 && h('button.btn.sm', { on: { click: async () => {
+        if (!await confirm(`Send all ${drafts.length} drafts as written? Each Bot sends its own.`, { label: `Send ${drafts.length}`, danger: false })) return;
+        for (const m of drafts) { await act(m, { action: 'send' }); await new Promise((r) => setTimeout(r, 250)); }
+        toast(`Sending ${drafts.length} drafts`);
+      } } }, icon('send'), `Send all ${drafts.length} drafts`),
       h('button.btn.ghost.sm', { on: { click: () => go('#/home') } }, 'Done')),
     h('div.tri-body', list, detail)));
   $main.querySelector('.tri-item.on')?.scrollIntoView({ block: 'nearest' });

@@ -70,7 +70,7 @@ export function assign({ title, detail = '', ownerId, assignedBy = 'user', due =
   activity.log({ botId: owner.id, kind: 'task', summary: `Assigned: ${title}`, detail: `From ${name(assignedBy)}${due ? `, due ${due}` : ''}`, status: 'ok', origin: 'company' });
   emit('company');
   if (wake && engine) {
-    engine.runInDm(owner.id, `[New assignment from ${name(assignedBy)}${due ? `, due ${due}` : ''}] ${title}\n${detail}\n\nAssignment id: ${id}. Work it now if it's urgent, or fit it into your shift. Use update_task as you go and submit_task when it's done.`,
+    engine.runInOffice(owner.id, `[New assignment from ${name(assignedBy)}${due ? `, due ${due}` : ''}] ${title}\n${detail}\n\nAssignment id: ${id}. Work it now if it's urgent, or fit it into your shift. Use update_task as you go and submit_task when it's done.`,
       { origin: 'handoff' }).catch(() => {});
   }
   return getTask(id);
@@ -89,12 +89,12 @@ export function update(id, { status, note: text, by }) {
 export function submit(id, { result, by }) {
   const t = getTask(id);
   if (!t) throw new Error('No such assignment');
-  const boss = bossOf(t.owner_id);
+  const boss = setting('task_reviews') === '1' ? bossOf(t.owner_id) : null;
   run('UPDATE tasks SET result = ?, updated = ? WHERE id = ?', String(result || '').slice(0, 6000), now(), id);
   if (boss) {
     run("UPDATE tasks SET status = 'review', reviewer_id = ? WHERE id = ?", boss.id, id);
     emit('company');
-    engine?.runInDm(boss.id, `[Review an assignment] ${name(t.owner_id)} finished "${t.title}" (id ${id}).\nWhat was asked: ${t.detail || t.title}\nTheir result:\n${String(result || '').slice(0, 4000)}\n\n` +
+    engine?.runInOffice(boss.id, `[Review an assignment] ${name(t.owner_id)} finished "${t.title}" (id ${id}).\nWhat was asked: ${t.detail || t.title}\nTheir result:\n${String(result || '').slice(0, 4000)}\n\n` +
       'Check it like a good manager: is it complete, correct and sourced, and does it answer what was asked? Open any files it names. ' +
       'Then call review_task with verdict "approve" or "send_back" and clear notes.', { origin: 'handoff' }).catch(() => {});
     return `Sent to ${boss.name} for review.`;
@@ -102,8 +102,8 @@ export function submit(id, { result, by }) {
   run("UPDATE tasks SET status = 'done', done_at = ? WHERE id = ?", now(), id);
   activity.log({ botId: t.owner_id, kind: 'task', summary: `Done: ${t.title}`, status: 'ok', origin: 'company' });
   emit('company');
-  emit('notify', { botId: t.owner_id, title: `${name(t.owner_id)} finished an assignment`, body: t.title });
-  return 'Marked done. Your boss is the user, who sees it on the Company page.';
+  if (t.assigned_by === 'user') emit('notify', { botId: t.owner_id, title: `${name(t.owner_id)} finished`, body: t.title });
+  return 'Done.';
 }
 
 export function review(id, { verdict, notes = '', by }) {
@@ -118,7 +118,7 @@ export function review(id, { verdict, notes = '', by }) {
     run("UPDATE tasks SET status = 'doing', updated = ? WHERE id = ?", now(), id);
     note(t, by, `Sent back: ${notes}`);
     activity.log({ botId: t.owner_id, kind: 'task', summary: `Sent back: ${t.title}`, detail: notes, status: 'error', origin: 'company' });
-    engine?.runInDm(t.owner_id, `[${name(by)} sent your assignment back] "${t.title}" (id ${id})\nNotes: ${notes}\nFix it and submit_task again.`, { origin: 'handoff' }).catch(() => {});
+    engine?.runInOffice(t.owner_id, `[${name(by)} sent your assignment back] "${t.title}" (id ${id})\nNotes: ${notes}\nFix it and submit_task again.`, { origin: 'handoff' }).catch(() => {});
   }
   emit('company');
   return verdict === 'approve' ? 'Approved.' : 'Sent back with your notes.';
@@ -126,13 +126,13 @@ export function review(id, { verdict, notes = '', by }) {
 
 // ---- Draft review: a report's drafts go to their boss before they reach you -----------------
 const REVIEW_TTL = 2 * 3600e3;
-export function needsDraftReview(botId) { return setting('draft_reviews') !== '0' && !!bossOf(botId); }
+export function needsDraftReview(botId) { return setting('draft_reviews') === '1' && !!bossOf(botId); }
 
 export function requestDraftReview(msg, ownerId) {
   const boss = bossOf(ownerId);
   if (!boss || !engine) return;
   const c = msg.card;
-  engine.runInDm(boss.id, `[Review a draft] ${name(ownerId)} drafted this ${c.app} message (card ${msg.id}). It reaches Neil only after you pass it.\n` +
+  engine.runInOffice(boss.id, `[Review a draft] ${name(ownerId)} drafted this ${c.app} message (card ${msg.id}). It reaches Neil only after you pass it.\n` +
     `To: ${c.to}${c.cc ? `\nCc: ${c.cc}` : ''}${c.subject ? `\nSubject: ${c.subject}` : ''}\n\n${c.body}\n\n` +
     'Check: it belongs in their lane, it is not a duplicate (search Gmail Sent and Drafts for this recipient), every fact is true, ' +
     'and it reads well. Then call review_draft with verdict "approve" (you may fix the subject or body) or "send_back" with notes.', { origin: 'handoff' }).catch(() => {});
@@ -179,16 +179,11 @@ export function promptBlock(bot) {
   const boss = bossOf(bot.id);
   const reports = reportsOf(bot.id);
   const open = tasks({ ownerId: bot.id, open: true });
-  const toReview = all("SELECT * FROM tasks WHERE reviewer_id = ? AND status = 'review'", bot.id);
   const co = companyName();
   return `## Your job${co ? ` at ${co}` : ''}
-You are ${bot.title ? `the ${bot.title}` : 'an employee'}${co ? ` at ${co}` : ''}. You report to ${boss ? `${boss.name}${boss.title ? ` (${boss.title})` : ''}` : 'Neil, the founder'}.
-${reports.length ? `Your direct reports: ${reports.map((r) => `${r.name}${r.title ? ` (${r.title})` : ''}`).join(', ')}. You manage them: break your goals into assignments for them with assign_task, review what they submit (review_task) and their drafts (review_draft) carefully but quickly, and unblock them. Don't do their work for them.` : ''}
-How work flows here, like a real company:
-- Ask your boss before Neil: when you need a decision or you're blocked, message_bot your boss first. ${boss ? '' : 'You report to Neil, so use ask_user for decisions only he can make. '}Bosses answer what they can and pass up only what needs the founder.
-- ${boss ? `Your drafts go to ${boss.name} for review before Neil sees them. If one comes back, fix it.` : 'Your drafts go straight to Neil.'}
-- Assignments: check yours with list_tasks, mark progress with update_task, and submit_task when done. Your boss reviews it.
-- Shifts: at the start of your first session each day, post_report a standup (yesterday, today, blockers). In your last session of the day, post_report an end-of-day report (shipped, open, blocked).
-${open.length ? `Your open assignments:\n${open.slice(0, 8).map((t) => `- [${t.status}] ${t.title} (id ${t.id})${t.due ? `, due ${t.due}` : ''}${t.notes?.length ? `. Latest note: ${t.notes.at(-1).text.slice(0, 160)}` : ''}`).join('\n')}` : 'You have no open assignments.'}
-${toReview.length ? `Waiting for your review: ${toReview.map((t) => `"${t.title}" from ${name(t.owner_id)} (id ${t.id})`).join(', ')}.` : ''}`;
+You are ${bot.title ? `the ${bot.title}` : 'an employee'}${co ? ` at ${co}` : ''}, reporting to ${boss ? `${boss.name}${boss.title ? ` (${boss.title})` : ''}` : 'Neil, the founder'}.${reports.length ? ` Your team: ${reports.map((r) => r.name).join(', ')}; you can hand them work with assign_task.` : ''}
+You own your area end to end. Do the work yourself; involve teammates only when the work is truly theirs.${open.length ? `
+Your open assignments:
+${open.slice(0, 8).map((t) => `- ${t.title} (id ${t.id})${t.due ? `, due ${t.due}` : ''}`).join('\n')}
+Mark them done with submit_task when finished.` : ''}`;
 }

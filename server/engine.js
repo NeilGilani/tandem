@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { ROOT, PATHS, uid, now, run as sql, get as sqlGet, setting } from './db.js';
-import { CLAUDE_BIN, childEnv, quickJson } from './claude.js';
+import { CLAUDE_BIN, childEnv, quickJson, quick } from './claude.js';
 import { emit } from './bus.js';
 import { pickModel } from './router.js';
 import * as chats from './chats.js';
@@ -388,9 +388,9 @@ function start(botId, chatId, text, opts) {
   }
 
   // One message per turn: the final answer, with the work that led to it folded into steps.
-  function postFinal(finalText) {
+  async function postFinal(finalText) {
     const t = (finalText || '').trim();
-    if (!t || (chat.kind === 'group' && /^PASS\.?$/i.test(t))) return;
+    if (!t || /^PASS\.?$/i.test(t)) return;
     if (opts.origin === 'squad') { runCtx.text = t; return; } // a helper's report goes to its lead, not the chat
     let shot = null;
     if (runCtx.browser && runCtx.lastShot) shot = runCtx.lastShot;
@@ -398,14 +398,22 @@ function start(botId, chatId, text, opts) {
     const steps = runCtx.steps.filter((x) => !(x.k === 'text' && (tailSet.has(x.t) || t.includes(x.t))))
       .slice(-80).map((x) => ({ k: x.k, t: x.t.slice(0, 600) }));
     runCtx.text = t;
-    const m = chats.addMessage({ chatId, author: 'bot', botId, text: t, parentId: opts.parentId || null,
+    // Long answers to the user get cut to the essentials (the full one is a click away).
+    let shown = t, full = null;
+    const wantsDetail = /\b(detail|details|explain|full|everything|all of|why|walk me|step by step|report|write[- ]?up|document|list|breakdown|in depth)\b/i.test(text);
+    if (t.length > 650 && !wantsDetail && (chat.kind === 'dm' || chat.kind === 'group') && opts.origin !== 'routine') {
+      const short = await quick(`Rewrite this reply from an AI employee to their busy boss so it fits in at most 4 short lines (under 420 characters). Keep the main result, key numbers and names, links, file names, and the one thing the boss must do if there is one. Drop caveats, process, lists of what was checked, and internal ids. Keep the same first-person voice and any Markdown links. Output only the rewritten reply.\n\nReply:\n${t}`,
+        { system: 'You make workplace chat replies short and clear without losing facts.', timeoutMs: 25000 }).catch(() => null);
+      if (short && short.length < t.length * 0.8) { shown = short.trim(); full = t; }
+    }
+    const m = chats.addMessage({ chatId, author: 'bot', botId, text: shown, parentId: opts.parentId || null,
       meta: { runId: id, model, origin: opts.origin, steps, duration: now() - runCtx.started, browser: !!runCtx.browser, shot,
-        files: producedFiles(botId, runCtx), sites: [...runCtx.hosts].filter(Boolean).slice(0, 12) } });
+        files: producedFiles(botId, runCtx), sites: [...runCtx.hosts].filter(Boolean).slice(0, 12), ...(full ? { full } : {}) } });
     runCtx.messageId = m.id;
     if ((opts.origin === 'chat' || opts.origin === 'system') && chat.kind === 'dm' && !/^\[Voice call\]/.test(text)) suggestNext(m, text, t);
   }
 
-  child.on('close', (code) => {
+  child.on('close', async (code) => {
     clearInterval(watchdog);
     if (active.get(key) === runCtx) active.delete(key);
     try { fs.unlinkSync(mcpFile); } catch {}
@@ -417,7 +425,7 @@ function start(botId, chatId, text, opts) {
         uid('u_'), botId, model, resultEvt.total_cost_usd || 0,
         (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0), u.output_tokens || 0, opts.origin, now());
       if (resultEvt.is_error) error = resultEvt.result || resultEvt.subtype || 'Run failed';
-      else postFinal(resultEvt.result || runCtx.tail.join('\n\n'));
+      else await postFinal(resultEvt.result || runCtx.tail.join('\n\n'));
     } else if (runCtx.stalled) {
       error = `A step hung with no progress for ${STALL_MS / 60e3} minutes`;
     } else if (!runCtx.stopped) {
@@ -450,11 +458,22 @@ function start(botId, chatId, text, opts) {
         chats.addMessage({ chatId, author: 'system', botId, text: `${bot.name} hit a problem: ${error}`, meta: { error: true } });
       }
     }
-    if (!resultEvt && runCtx.stopped && runCtx.tail.length) postFinal(runCtx.tail.join('\n\n'));
+    if (!resultEvt && runCtx.stopped && runCtx.tail.length) await postFinal(runCtx.tail.join('\n\n'));
     if (runCtx.stopped && !runCtx.silentStop) chats.addMessage({ chatId, author: 'system', botId, text: `${bot.name} stopped. Work already done isn't undone.` });
     runCtx.status = 'done';
     emit('run', { ...publicRun(runCtx), ended: true });
-    if (runCtx.text && bot.notify && opts.origin !== 'chat') emit('notify', { botId, chatId, title: bot.name, body: runCtx.text.slice(0, 140) });
+    if (runCtx.text && bot.notify && opts.origin !== 'chat' && chat.kind !== 'office') emit('notify', { botId, chatId, title: bot.name, body: runCtx.text.slice(0, 140) });
+    // A reply that ends by offering more work it could just do: say yes once, so the user gets the result.
+    const offer = /(want me to|should i|shall i|do you want me to|would you like me to|let me know if you(?:'d)? (?:want|like)|i can [^.?!]{3,90} if you(?:'d)? (?:want|like))[^?!.]*[?.!]?\s*$/i;
+    if (!error && !runCtx.stopped && runCtx.text && offer.test(runCtx.text.split('\n').slice(-2).join(' ')) && ['chat', 'system'].includes(opts.origin)
+      && !opts._autoYes && chat.kind === 'dm' && !approvals.pendingFor?.(id)) {
+      if (runCtx.messageId) {
+        const cur = chats.getMessage(runCtx.messageId);
+        const kept = (cur?.text || '').replace(/\s*[^.!?\n]*\b(want me to|should i|shall i|do you want me to|would you like me to|let me know if|i can)\b[^\n]*$/i, '').trim();
+        if (kept) chats.updateMessage(runCtx.messageId, { text: kept });
+      }
+      setTimeout(() => runBot(botId, chatId, '[Yes, do it. Then report the result in one or two lines.]', { ...opts, origin: 'system', _autoYes: true, attachments: [] }).catch(() => {}), 400);
+    }
     // Bot-to-bot: the reply lands back where the handoff came from.
     if (opts.replyTo && runCtx.text && !error) deliverReply(botId, opts.replyTo, runCtx.text, opts.depth || 0);
     computer.touch(botId);
@@ -531,6 +550,10 @@ export const activeRuns = () => [...active.values()].map(publicRun);
 
 // ---- Entry points -------------------------------------------------------------------
 
+export function runInOffice(botId, text, opts = {}) {
+  return runBot(botId, chats.officeFor(botId).id, text, opts);
+}
+
 export function runInDm(botId, text, opts = {}) {
   const dm = chats.dmFor(botId);
   return runBot(botId, dm.id, text, opts);
@@ -581,18 +604,21 @@ export function handoff({ fromBot, fromChat, to, text, expectReply = true, depth
   if (target.id === fromBot) throw new Error("You can't hand off to yourself");
   if (depth > 4) throw new Error('Too many handoffs in a row; finish the work or ask the user.');
   const sender = chats.getBot(fromBot);
-  const dm = chats.dmFor(target.id);
+  // Bot-to-Bot work happens in the target's back office, not in the user's chats.
+  const office = chats.officeFor(target.id);
   activity.log({ botId: fromBot, chatId: fromChat, kind: 'handoff', summary: `Handed work to ${target.name}`, detail: text, status: 'ok' });
-  chats.addMessage({ chatId: fromChat, author: 'system', botId: fromBot, text: `Sending to ${target.name}`, meta: { kind: 'handoff', from: fromBot, to: target.id, detail: text } });
-  chats.addMessage({ chatId: dm.id, author: 'bot', botId: fromBot, text, meta: { handoff: true, to: target.id, fromChat } });
-  runBot(target.id, dm.id, `Message from ${sender.name} (another of the user's Bots):\n${text}` +
-    (expectReply ? `\n\nYour final reply will be sent back to ${sender.name}.` : ''),
+  chats.addMessage({ chatId: office.id, author: 'bot', botId: fromBot, text, meta: { handoff: true, to: target.id, fromChat } });
+  runBot(target.id, office.id, `Message from ${sender.name} (a teammate, not the user):\n${text}` +
+    (expectReply ? `\n\nYour final reply goes to ${sender.name}. Answer in a few lines: the facts they asked for, nothing else.` : ''),
   { origin: 'handoff', replyTo: expectReply ? { botId: fromBot, chatId: fromChat } : null, depth: depth + 1 });
   return { delivered: true, to: target.name };
 }
 
 function deliverReply(fromBotId, replyTo, text, depth) {
   const from = chats.getBot(fromBotId);
-  chats.addMessage({ chatId: replyTo.chatId, author: 'system', botId: fromBotId, text: `Message from ${from.name}`, meta: { kind: 'handoff-reply', from: fromBotId, detail: text.slice(0, 4000) } });
-  runBot(replyTo.botId, replyTo.chatId, `Reply from ${from.name}:\n${text}`, { origin: 'handoff', depth });
+  activity.log({ botId: replyTo.botId, kind: 'handoff', summary: `Reply from ${from.name}`, detail: text.slice(0, 1500), status: 'ok' });
+  const where = chats.getChat(replyTo.chatId);
+  const forUser = where?.kind === 'dm' || where?.kind === 'group';
+  runBot(replyTo.botId, replyTo.chatId, `[Reply from ${from.name}, a teammate]\n${text}\n\n` +
+    (forUser ? 'If the user is waiting on this, give them the answer in a few lines. If you are still waiting on other teammates, reply with exactly PASS and wait for them.' : 'Carry on with your work.'), { origin: 'handoff', depth });
 }

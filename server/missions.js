@@ -154,10 +154,10 @@ function inHours(m) {
 // Shift rituals: a standup to open the day, an end-of-day report to close it.
 function shiftNote(m) {
   const out = [];
-  if (!company.hadStandup(m.bot_id)) out.push('Start of your shift: before anything else, post_report a standup (yesterday, today, blockers).');
+  if (!company.hadStandup(m.bot_id)) out.push('First session today: post_report a two-line standup (today, blockers), then get to work.');
   const mm = String(m.hours || '').match(/(\d{1,2})-(\d{1,2})/);
   const hour = Number(new Date().toLocaleString('en-US', { timeZone: timezone(), hour: 'numeric', hourCycle: 'h23' }));
-  if (mm && hour >= Number(mm[2]) - 1 && !company.hadEod(m.bot_id)) out.push('Your shift ends within the hour: finish with an end-of-day post_report (shipped, open, blocked) before your checkpoint.');
+  if (mm && hour >= Number(mm[2]) - 1 && !company.hadEod(m.bot_id)) out.push('Last session today: end with a two-line end-of-day post_report (shipped, blocked).');
   return out.length ? out.join('\n') + '\n\n' : '';
 }
 

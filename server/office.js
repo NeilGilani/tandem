@@ -199,7 +199,7 @@ export function runReviews() {
       const g = goals().filter((x) => x.owner_id === r.id).map((x) => `${x.title} ${x.current}/${x.target}`).join('; ');
       return `- ${r.name} (${r.title || 'no title'}): worked ${t.minutes || 0} min in ${t.sessions || 0} sessions, ${t.tasksDone || 0} assignments done, ${t.sentBack || 0} sent back, ${t.drafts || 0} drafts${g ? `; goals: ${g}` : ''}`;
     }).join('\n');
-    engine.runInDm(boss.id, `[Monthly reviews] Review each of your direct reports for the past month:\n${lines}\n\n` +
+    engine.runInOffice(boss.id, `[Monthly reviews] Review each of your direct reports for the past month:\n${lines}\n\n` +
       'For each one, look at their real work (their chat, assignments, drafts, goals), then call write_review with a rating from 1 to 5, ' +
       'what went well, what to improve, and one concrete coaching change. The coaching is saved to their memory, so make it specific and actionable.', { origin: 'handoff' }).catch(() => {});
     n++;

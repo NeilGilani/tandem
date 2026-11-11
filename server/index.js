@@ -120,7 +120,7 @@ function publicSettings() {
   return {
     auto_review: setting('auto_review') === '1',
     toolbox: toolbox.status().state,
-    draft_reviews: setting('draft_reviews') !== '0',
+    draft_reviews: setting('draft_reviews') === '1',
     company_name: setting('company_name') || '',
     computer_mode: laptop.enabled() ? 'laptop' : 'mac',
     laptops: laptop.status(),

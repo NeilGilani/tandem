@@ -2,7 +2,7 @@
 // implemented here). Tools that need you post a card in chat and wait.
 import fs from 'node:fs';
 import path from 'node:path';
-import { PATHS, now } from './db.js';
+import { PATHS, now, all } from './db.js';
 import { emit } from './bus.js';
 import * as chats from './chats.js';
 import * as memory from './memory.js';
@@ -72,6 +72,8 @@ export const DEFS = [
   ['mission_checkpoint', 'End a mission work session. Record what you did and decide what happens next: continue right away, wait until a time, blocked on the user, or done.',
     S({ note: str('What you did this session and where you left off (your future self reads this)'), next: { type: 'string', enum: ['continue', 'wait', 'blocked', 'done'] },
       wait_until: str('ISO date-time to wake up, when next="wait"'), wait_reason: str('What you will do when you wake up'), blocked_reason: str('What you need from the user, when next="blocked"'), summary: str('Final summary of results, when next="done"') }, ['note', 'next'])],
+  ['team_status', "See what every Bot on the team is doing right now: who is working and on what step, their current mission and plan progress, open assignments, and their last few actions. Use it instead of asking teammates for a status.", S({})],
+  ['discard_draft', 'Drop one of your own drafts that is no longer needed (by recipient). The user stops seeing it.', S({ to: str('The recipient of the draft to drop') }, ['to'])],
   ['post_to_channel', 'Post in a team channel (like #general or your department channel): updates, wins, questions for the team, blockers. @Name a teammate to get their reply in the channel.',
     S({ channel: str('Channel name, e.g. #sales'), text: str('The message') }, ['channel', 'text'])],
   ['read_channel', 'Read the latest messages in a team channel.', S({ channel: str('Channel name'), limit: num('How many (default 20)') }, ['channel'])],
@@ -124,9 +126,9 @@ const BACKGROUND_TTL = 30 * 60 * 1000;
 
 function cardChat(ctx) {
   const chat = chats.getChat(ctx.chatId);
-  if (chat?.kind !== 'group') return ctx.chatId;
+  if (!chat || chat.kind === 'dm') return ctx.chatId;
   const dm = chats.dmFor(ctx.botId);
-  chats.addMessage({ chatId: ctx.chatId, author: 'system', botId: ctx.botId, text: `${chats.getBot(ctx.botId).name} needs you in its one-to-one chat.` });
+  if (chat.kind === 'group') chats.addMessage({ chatId: ctx.chatId, author: 'system', botId: ctx.botId, text: `${chats.getBot(ctx.botId).name} needs you in its one-to-one chat.` });
   return dm.id;
 }
 
@@ -165,13 +167,13 @@ export function resolveCard(msgId, payload) {
   };
   switch (card.type) {
     case 'hire': {
-      if (payload.decline) { done('declined', {}); engine.runInDm(card.boss, `[Neil declined hiring a ${card.role}]${payload.note ? ` ${payload.note}` : ''}`, { origin: 'handoff' }).catch(() => {}); return true; }
+      if (payload.decline) { done('declined', {}); engine.runInOffice(card.boss, `[Neil declined hiring a ${card.role}]${payload.note ? ` ${payload.note}` : ''}`, { origin: 'handoff' }).catch(() => {}); return true; }
       const nb = chats.createBot({ name: (payload.name || card.name || card.role).trim(), label: card.role });
       company.setRole(nb.id, { title: card.role, bossId: card.boss });
       memory.remember(nb.id, `My job (hired ${new Date().toISOString().slice(0, 10)}): ${card.role}, reporting to ${chats.getBot(card.boss)?.name}. ${card.why}`);
       card.hired = nb.id;
       done('hired', { botId: nb.id });
-      engine.runInDm(card.boss, `[Neil approved the hire] ${nb.name} (${card.role}) now reports to you. Give them their first assignment with assign_task.`, { origin: 'handoff' }).catch(() => {});
+      engine.runInOffice(card.boss, `[Neil approved the hire] ${nb.name} (${card.role}) now reports to you. Give them their first assignment with assign_task.`, { origin: 'handoff' }).catch(() => {});
       return true;
     }
     case 'question':
@@ -252,7 +254,7 @@ async function siteFetch(args, ctx) {
   const readOnly = /^(GET|HEAD|OPTIONS)$/.test(method) || (method === 'POST' && /^\s*\{?\s*"?(query|operationName)"?/.test(body || '') && !/\bmutation\b/.test(body || ''));
   if (!readOnly) {
     const chat = chats.getChat(ctx.chatId);
-    const dctx = { ...ctx, isGroup: chat?.kind === 'group', chatId: chat?.kind === 'group' ? chats.dmFor(ctx.botId).id : ctx.chatId };
+    const dctx = { ...ctx, isGroup: chat?.kind === 'group', chatId: chat && chat.kind !== 'dm' ? chats.dmFor(ctx.botId).id : ctx.chatId };
     const v = await approvals.confirm('site_fetch', { url, method, body: (body || '').slice(0, 2000) }, dctx,
       { summary: `${method} to ${u.host} with your sign-in`, url, warnings: [method === 'DELETE' ? "This can't be undone" : 'This changes data on that site'] });
     if (v.behavior !== 'allow') return v.message || 'The user denied this request.';
@@ -290,6 +292,25 @@ export async function call(tool, args = {}, ctx) {
 
   switch (tool) {
     case 'site_fetch': return siteFetch(args, ctx);
+    case 'team_status': {
+      const runs = engine.activeRuns();
+      const ms = missions.list();
+      return chats.listBots().map((b) => {
+        const r = runs.find((x) => x.botId === b.id && !x.squadId);
+        const m = ms.find((x) => x.bot_id === b.id && ['active', 'waiting', 'blocked'].includes(x.status));
+        const t = company.tasks({ ownerId: b.id, open: true });
+        const recent = activity.list({ botId: b.id, since: now() - 864e5 }).filter((a) => ['run', 'draft', 'task', 'handoff'].includes(a.kind)).slice(0, 4).map((a) => a.summary);
+        const plan = m?.plan ? `${(m.plan.match(/^\s*[-*] \[x\]/gim) || []).length}/${(m.plan.match(/^\s*[-*] \[[ x]\]/gim) || []).length} steps` : '';
+        return `${b.name}${b.title ? ` (${b.title})` : ''}: ${r ? `WORKING now: ${r.status}` : 'idle'}${m ? `; mission "${m.title}" ${m.status}${plan ? `, ${plan}` : ''}${m.status === 'waiting' && m.wake_reason ? ` (next: ${m.wake_reason})` : ''}${m.status === 'blocked' && m.block_reason ? ` (blocked: ${m.block_reason})` : ''}` : ''}${t.length ? `; assignments: ${t.map((x) => x.title).slice(0, 3).join('; ')}` : ''}${recent.length ? `; recently: ${recent.join(' | ')}` : ''}`;
+      }).join('\n');
+    }
+    case 'discard_draft': {
+      const norm = (x) => String(x || '').toLowerCase().replace(/\s+/g, '');
+      const list = all(`SELECT * FROM messages WHERE bot_id = ? AND card LIKE '%"type":"draft"%' ORDER BY created DESC LIMIT 100`, ctx.botId)
+        .map(chats.parseMsg).filter((m) => ['pending', 'review', 'returned'].includes(m.card?.status) && norm(m.card.to) === norm(args.to));
+      for (const m of list) chats.updateMessage(m.id, { card: { ...m.card, status: 'discarded' } });
+      return list.length ? `Dropped ${list.length} draft${list.length === 1 ? '' : 's'} to ${args.to}.` : `You have no open draft to ${args.to}.`;
+    }
     case 'post_to_channel': office.post(ctx.botId, args.channel, args.text || args.message, Number(ctx.depth || 0)); return `Posted in ${args.channel}.`;
     case 'read_channel': { const c = office.channelByName(args.channel); if (!c) return `No channel ${args.channel}. Channels: ${office.channels().map((x) => x.name).join(', ')}`; return office.recent(c.id, Math.min(Number(args.limit) || 20, 60)) || '(no messages yet)'; }
     case 'list_goals': return office.scoreboard() || 'No goals yet.';
@@ -321,7 +342,7 @@ export async function call(tool, args = {}, ctx) {
         return 'Approved. It is in Neil\'s inbox now.';
       }
       chats.updateMessage(m.id, { card: { ...m.card, status: 'returned', reviewedBy: me, reviewNote: args.notes || '' } });
-      engine.runInDm(m.bot_id, `[${me} sent your draft back] To: ${m.card.to}${m.card.subject ? `, "${m.card.subject}"` : ''}\nNotes: ${args.notes || '(none)'}\nFix it and draft again if it's still needed.`, { origin: 'handoff' }).catch(() => {});
+      engine.runInOffice(m.bot_id, `[${me} sent your draft back] To: ${m.card.to}${m.card.subject ? `, "${m.card.subject}"` : ''}\nNotes: ${args.notes || '(none)'}\nFix it and draft again if it's still needed.`, { origin: 'handoff' }).catch(() => {});
       return 'Sent back with your notes.';
     }
     case 'post_report': company.postReport(ctx.botId, args.kind === 'eod' ? 'eod' : 'standup', args.text); return 'Posted.';
@@ -344,7 +365,7 @@ export async function call(tool, args = {}, ctx) {
     case 'approval_prompt': {
       const chat = chats.getChat(ctx.chatId);
       const decisionCtx = { ...ctx, isGroup: chat?.kind === 'group' };
-      if (decisionCtx.isGroup) decisionCtx.chatId = chats.dmFor(ctx.botId).id;
+      if (chat && chat.kind !== 'dm') decisionCtx.chatId = chats.dmFor(ctx.botId).id;
       return approvals.decide(args.tool_name, args.input || {}, decisionCtx);
     }
     case 'remember': {
@@ -430,6 +451,17 @@ export async function call(tool, args = {}, ctx) {
     case 'draft_message': {
       args.app = args.app || (/@/.test(args.to || '') ? 'Email' : 'Message');
       if (!String(args.body || '').trim()) throw new Error('Put the full message in "body".');
+      // One draft per recipient: update the open one instead of piling up another.
+      const norm = (x) => String(x || '').toLowerCase().replace(/\s+/g, '');
+      const mine = all(`SELECT * FROM messages WHERE bot_id = ? AND card LIKE '%"type":"draft"%' AND created > ? ORDER BY created DESC LIMIT 60`, ctx.botId, now() - 21 * 864e5)
+        .map(chats.parseMsg).find((m) => ['pending', 'review', 'returned'].includes(m.card?.status) && norm(m.card.to) === norm(args.to));
+      if (mine) {
+        const reviewNow = company.needsDraftReview(ctx.botId);
+        chats.updateMessage(mine.id, { card: { ...mine.card, app: args.app, cc: args.cc || mine.card.cc || '', subject: args.subject ?? mine.card.subject, body: args.body, thread: args.thread || mine.card.thread || '',
+          status: reviewNow ? 'review' : 'pending', reviewedBy: null, reviewNote: null, ...(reviewNow ? { reviewSince: now() } : {}) } });
+        if (reviewNow) company.requestDraftReview(chats.getMessage(mine.id), ctx.botId);
+        return `Updated your existing draft to ${args.to}.`;
+      }
       // A Bot with a boss: the draft goes to the boss for review before it reaches you.
       const review = company.needsDraftReview(ctx.botId);
       const boss = review ? company.bossOf(ctx.botId) : null;

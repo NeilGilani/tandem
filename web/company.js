@@ -137,8 +137,8 @@ export async function renderCompany($main) {
       h('div', { style: { marginTop: '10px' } }, h('button.btn.ghost.sm', { title: 'Each boss reviews its reports now instead of on the first weekday of the month', on: { click: () => api('POST', '/api/office/reviews').then((r) => toast(r.bosses ? `${r.bosses} boss${r.bosses === 1 ? ' is' : 'es are'} writing reviews` : 'No bosses with reports yet')) } }, 'Run monthly reviews now'))),
     h('section.co-sec', h('div.group-h', 'Handbook'), handbookBlock),
     h('section.co-sec', h('div.group-h', 'Timesheet, last 7 days'), sheet),
-    h('label.co-toggle', h('input', { type: 'checkbox', checked: S.settings.draft_reviews !== false, on: { change: (e) => api('PATCH', '/api/company', { draft_reviews: e.target.checked }) } }),
-      h('span', h('b', 'Bosses review drafts first'), h('span.hint', 'A Bot\'s outgoing drafts go to its boss before your inbox. Bots reporting to you come straight to you.'))))));
+    h('label.co-toggle', h('input', { type: 'checkbox', checked: S.settings.draft_reviews === true, on: { change: (e) => api('PATCH', '/api/company', { draft_reviews: e.target.checked }) } }),
+      h('span', h('b', 'Bosses review drafts first'), h('span.hint', 'Off: every draft comes straight to you. On: a Bot\'s drafts go to its boss first, which is slower and chattier.'))))));
 
   function nodeMenu(e, o) {
     const r = e.currentTarget.getBoundingClientRect();

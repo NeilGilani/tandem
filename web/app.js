@@ -329,7 +329,11 @@ function renderBotParts(m, isGroup, showWho) {
   if (m.meta?.steps?.length > 0) parts.push(stepsBlock(m));
   if (m.meta?.browser && m.meta?.shot && m.text) parts.push(computerCard({ botId: m.bot_id, state: 'done', shot: fileUrl(m.meta.shot), text: null }));
   if (m.meta?.handoff && m.author === 'bot') parts.push(h('div.who', `From ${b?.name || 'a Bot'}`));
-  if (m.text) parts.push(h('div.bubble', { html: md(m.text) }));
+  if (m.text) {
+    const full = m.meta?.full && openDetails.has(`full:${m.id}`);
+    parts.push(h('div.bubble', { html: md(full ? m.meta.full : m.text) }));
+    if (m.meta?.full) parts.push(h('button.more-link', { on: { click: () => { const k = `full:${m.id}`; openDetails.has(k) ? openDetails.delete(k) : openDetails.add(k); paintMessages({ keepScroll: true }); } } }, full ? 'Show less' : 'Show full answer'));
+  }
   if (m.meta?.files?.length) parts.push(fileChips(m.meta.files));
   if (m.card) parts.push(renderCard(m));
   if (m.meta?.suggestions?.length && isLatestBot(m)) parts.push(h('div.suggest', m.meta.suggestions.map((t) => h('button.sug', { on: { click: () => sendQuick(m.chat_id, t) } }, t))));
