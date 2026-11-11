@@ -419,7 +419,7 @@ const linkModal = (name, links, lan) => modal({ title: `${name}'s sign-in link`,
   lan && links.length ? [h('p.hint', `Send this to ${name} privately. It works once they're on your Tailscale network (or the same Wi-Fi). It's the only time it's shown; you can make a new one later.`),
     links.map((u) => h('div.copy-field', h('input.input', { value: u, readOnly: true }), h('button.btn', { on: { click: () => { navigator.clipboard.writeText(u); toast('Copied'); } } }, 'Copy'))),
     links.length > 1 ? h('p.hint', 'Use the 100.x address for Tailscale, the 192.168 / 10.x one on the same Wi-Fi.') : null]
-    : [h('p', 'Network access is off, so no one else can reach Tandem yet. Restart it with:'), h('pre', 'tandem install --lan'), h('p.hint', 'Then come back here and press New link next to their name.')],
+    : [h('p', 'Turn on "Let teammates connect" below first, then press New link next to their name.')],
 ], actions: [{ label: 'Done', primary: true }] });
 
 async function teamSettings(st, rerender) {
@@ -441,7 +441,12 @@ async function teamSettings(st, rerender) {
         h('button.btn.ghost', { on: { click: async () => { const r = await api('POST', `/api/members/${m.id}/link`); linkModal(m.name, r.links, r.lan); } } }, 'New link'),
         h('button.btn.ghost.danger', { on: { click: async () => { if (await confirm(`Remove ${m.name}? Their link stops working right away.`, { label: 'Remove' })) { await api('DELETE', `/api/members/${m.id}`); rerender(); } } } }, 'Remove')))),
     h('div.hstack', { style: { marginTop: '10px' } }, name, h('button.btn.primary', { on: { click: add } }, 'Add teammate')),
-    !lan && h('p.hint', { style: { marginTop: '8px' } }, 'Network access is off. Run tandem install --lan so teammates can reach this Mac (use Tailscale when you\'re not on the same Wi-Fi).'),
+    h('div.list', { style: { marginTop: '14px' } }, h('div.list-row', h('div.grow', 'Let teammates connect', h('small', lan ? 'On. Other computers can reach Tandem with a sign-in link. Away from your Wi-Fi, use Tailscale on both computers.' : 'Off. Only this Mac can open Tandem.')),
+      sw(lan, async (v) => {
+        const r = await api('POST', '/api/network', { on: v }).catch((e) => toast(e.message, 'bad'));
+        if (r?.restarting) { toast('Restarting Tandem…'); setTimeout(() => location.reload(), 6000); }
+        else if (r?.needsRestart) toast('Restart Tandem to apply this', 'bad');
+      }))),
     h('h2', 'Who pays for Bot work'),
     h('p.hint', 'A Claude Pro or Max plan is for one person. When teammates use your Bots, run them on a company Anthropic API key instead. It bills per use, so set a monthly limit in console.anthropic.com.'),
     h('div.list',

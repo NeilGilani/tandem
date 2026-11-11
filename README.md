@@ -72,7 +72,7 @@ use on your own subscription. Don't run Bots for other people on it; that needs 
 **Sharing with a cofounder:** Settings → Team. Add a teammate to get their own sign-in link
 (revocable on its own). Their requests carry their name and the Bots' questions go to them; only you
 can send from your accounts, connect apps, see saved logins or change settings. Switch "Who pays
-for Bot work" to a company Anthropic API key first. Reach this Mac with `tandem install --lan`
+for Bot work" to a company Anthropic API key first. Turn on "Let teammates connect" (or run `tandem install --lan`)
 plus Tailscale; never expose it to the public internet.
 
 ## Build the Mac app

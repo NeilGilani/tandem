@@ -32,7 +32,7 @@ import { spawn as spawnProc } from 'node:child_process';
 import { CATEGORIES } from './catalog.js';
 
 const PORT = Number(process.env.PORT || 4747);
-const HOST = process.argv.includes('--lan') || process.env.TANDEM_LAN ? '0.0.0.0' : '127.0.0.1';
+const HOST = process.argv.includes('--lan') || process.env.TANDEM_LAN || setting('network_access') === '1' ? '0.0.0.0' : '127.0.0.1';
 engine.setPort(PORT);
 tools.attach(engine);
 routines.attach(engine);
@@ -359,6 +359,14 @@ route('GET', '/api/members', () => ({ members: members.list(), lan: HOST === '0.
 route('POST', '/api/members', async (req) => { const r = members.add(await readJson(req)); return { member: r.member, links: linksFor(r.token), lan: HOST === '0.0.0.0' }; });
 route('POST', '/api/members/:id/link', (req, res, p) => { const r = members.relink(p.id); return { member: r.member, links: linksFor(r.token), lan: HOST === '0.0.0.0' }; });
 route('DELETE', '/api/members/:id', (req, res, p) => { members.revoke(p.id); return { ok: true }; });
+// Let other computers (teammates, your phone) reach Tandem. Takes a restart; the Mac app restarts itself.
+route('POST', '/api/network', async (req) => {
+  const on = !!(await readJson(req)).on;
+  setSetting('network_access', on ? '1' : '0');
+  const auto = process.env.TANDEM_APP === 'mac';
+  if (auto && (HOST === '0.0.0.0') !== on) setTimeout(() => process.exit(0), 400);
+  return { on, restarting: auto, needsRestart: !auto && (HOST === '0.0.0.0') !== on };
+});
 route('GET', '/api/billing', () => members.billing());
 route('POST', '/api/billing', async (req) => members.setBilling(await readJson(req)));
 route('POST', '/api/rules', async (req) => { const b = await readJson(req); return { id: approvals.addRule(b.kind, b.text) }; });

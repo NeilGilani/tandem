@@ -65,7 +65,7 @@ const OWNER_ONLY = [
   [/^(POST|DELETE|PATCH|PUT)$/, /^\/api\/connectors/],
   [/./, /^\/api\/vault/],
   [/./, /^\/api\/members/],
-  [/^(PATCH|POST)$/, /^\/api\/(settings|rules|billing)/],
+  [/^(PATCH|POST)$/, /^\/api\/(settings|rules|billing|network)/],
   [/^DELETE$/, /^\/api\/rules\//],
   [/^POST$/, /^\/api\/memory\/import$/],
   [/^DELETE$/, /^\/api\/bots\/[^/]+$/],
