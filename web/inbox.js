@@ -13,6 +13,7 @@ const KIND = {
   takeover: { ic: 'hand', label: 'Take over' },
   skill_draft: { ic: 'book', label: 'Skill' },
   hire: { ic: 'users', label: 'Hire' },
+  gmail_connect: { ic: 'mail', label: 'Connect' },
 };
 const ago = (ts) => {
   const s = (Date.now() - ts) / 1000;
@@ -33,6 +34,7 @@ export function titleOf(m) {
     case 'takeover': return c.reason;
     case 'skill_draft': return c.title;
     case 'hire': return c.title;
+    case 'gmail_connect': return 'Connect Gmail for your whole team';
     default: return 'Needs you';
   }
 }

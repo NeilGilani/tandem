@@ -33,6 +33,9 @@ const allowed = (acct, botId) => acct.shared === 'all' || acct.shared.includes(b
 export async function capture(botId, appId, { from = null } = {}) {
   const app = byId[appId];
   if (!app?.domains?.length) return false;
+  // Google signs a session out when it shows up in several browsers at once, so Google
+  // sign-ins aren't shared (Gmail goes through its own connection instead).
+  if (app.domains.some((d) => /(^|\.)google\.com$/.test(d))) return false;
   const jar = (from || await computer.cookies(botId)).filter((c) => matches(c, app.domains));
   const nowS = Date.now() / 1000;
   if (!app.auth?.length || !jar.some((c) => app.auth.includes(c.name) && (c.expires === -1 || c.expires > nowS))) return false;

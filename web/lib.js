@@ -214,7 +214,7 @@ export function modal({ title, body, actions = [], wide = false, onClose, cls = 
   const box = h(`div.modal${wide ? '.wide' : ''}${cls ? '.' + cls : ''}`,
     title && h('div.modal-h', title, h('button.icon-btn', { on: { click: close }, 'aria-label': 'Close' }, icon('x'))),
     h('div.modal-b', body),
-    actions.length && h('div.modal-f', actions.map((a) => h(`button.btn${a.primary ? '.primary' : ''}${a.danger ? '.danger' : ''}`, {
+    actions.length > 0 && h('div.modal-f', actions.map((a) => h(`button.btn${a.primary ? '.primary' : ''}${a.danger ? '.danger' : ''}`, {
       on: { click: async () => { try { if ((await a.onClick?.(close)) !== false) close(); } catch (e) { toast(e.message, 'bad'); } } },
     }, a.label))));
   const bg = h('div.modal-bg', { on: { mousedown: (e) => { if (e.target === bg) close(); } } }, box);

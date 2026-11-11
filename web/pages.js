@@ -1,6 +1,7 @@
 // Full-page views: Connect apps, Skills, Settings, Bot templates.
 import { api, h, avatar, icon, toast, modal, confirm, sw, logo, time, md, menu } from './lib.js';
 import { S, bot, dmOf, refresh, go, toggleComputer } from './store.js';
+import { gmailConnectCard } from './app.js';
 
 const page = ($main, title, lede, ...content) => {
   $main.replaceChildren(h('div.page', h('div.page-in',
@@ -95,9 +96,12 @@ export async function renderApps($main) {
 
   function appTile(a) {
     return h('div.tile',
-      h('div.tile-h', logo(a), h('div', { style: { flex: 1 } }, h('b', a.name), h('div.hint', a.category)), teamAcct(a.id) ? h('span.pill.good', 'Team') : a.status && statusPill(a.status)),
+      h('div.tile-h', logo(a), h('div', { style: { flex: 1 } }, h('b', a.name), h('div.hint', a.category)), teamAcct(a.id) ? h('span.pill.good', 'Team') : a.id === 'gmail' && S.settings.gmail_email ? h('span.pill.good', 'Team') : a.status && statusPill(a.status)),
       h('p', a.tips),
-      h('div.hstack', teamAcct(a.id) && a.installed_id ? h('span.hint', 'Every Bot that needs it signs in with the team\'s account.') : a.installed_id ? actionsFor({ ...a, id: a.installed_id }, () => renderApps($main), signIn) :
+      h('div.hstack', a.id === 'gmail' ? (S.settings.gmail_email
+        ? [h('span.hint', `Connected for every Bot: ${S.settings.gmail_email}`), h('button.btn.ghost.sm', { on: { click: () => api('DELETE', '/api/gmail').then(() => { toast('Gmail disconnected'); renderApps($main); }) } }, 'Disconnect')]
+        : h('button.btn.primary.sm', { on: { click: () => { const box = modal({ title: null, body: [gmailConnectCard(async (p) => { await api('POST', '/api/gmail', p); box.close(); toast('Gmail connected for every Bot'); renderApps($main); })], actions: [] }); } } }, 'Connect Gmail'))
+        : teamAcct(a.id) && a.installed_id ? h('span.hint', 'Every Bot that needs it signs in with the team\'s account.') : a.installed_id ? actionsFor({ ...a, id: a.installed_id }, () => renderApps($main), signIn) :
         h('button.btn', { on: { click: async () => {
           const row = await api('POST', '/api/connectors', { catalogId: a.id });
           const team = teamAcct(a.id);

@@ -629,6 +629,28 @@ export function teachTask(botId, chatId) {
 }
 
 // ---------- Viewer ------------------------------------------------------------------------------
+// Gmail for the whole team: one app password, every Bot uses it, nothing to sign in again.
+export function gmailConnectCard(submit) {
+  const addr = h('input.input', { type: 'email', placeholder: 'you@gmail.com', autocomplete: 'off', value: S.settings.user_email || '' });
+  const pass = h('input.input', { type: 'password', placeholder: '16-letter app password', autocomplete: 'new-password' });
+  const err = h('div.hint', { style: { color: 'var(--bad)' } });
+  const go = async () => {
+    err.textContent = '';
+    try { await submit({ address: addr.value.trim(), appPassword: pass.value }); }
+    catch (e) { err.textContent = e.message; }
+  };
+  return h('div.card.wide', h('div.card-h', 'Connect Gmail', h('span.pill.warn', 'Once for everyone')),
+    h('div.card-b',
+      h('div.card-title', 'Every Bot gets your Gmail. No browser sign-ins, nothing to log in to again.'),
+      h('ol.steps-ol',
+        h('li', 'Open ', h('a', { href: 'https://myaccount.google.com/apppasswords', target: '_blank', rel: 'noopener' }, 'Google app passwords'), ' and sign in if asked.'),
+        h('li', 'Name it "Tandem" and press Create.'),
+        h('li', 'Paste the 16 letters below.')),
+      h('div.draft-field', h('label', 'Gmail'), addr), h('div.draft-field', h('label', 'App password'), pass), err,
+      h('div.hint', 'It stays in your Mac\'s Keychain. Bots never see it. Revoke it any time from the same Google page.')),
+    h('div.card-actions', h('button.btn.primary', { on: { click: go } }, 'Connect Gmail')));
+}
+
 // What a Bot made this turn, as chips you can open right here.
 const FILE_ICON = { image: 'image', sheet: 'table', doc: 'file', slides: 'slides', page: 'page', code: 'code', file: 'file' };
 const size = (n) => n < 1024 ? `${n} B` : n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`;
@@ -766,6 +788,11 @@ function renderCard(m) {
         h('button.btn.primary', { on: { click: () => cardAction(m, { action: 'send', edits: edits() }) } }, isChat ? 'Send message' : 'Send'),
         h('button.btn', { on: { click: () => cardAction(m, { action: 'discard' }) } }, 'Discard'),
         h('button.btn.ghost', { style: { marginLeft: 'auto' }, on: { click: () => api('PATCH', `/api/bots/${m.bot_id}`, { drafts: 0 }).then(() => toast(`${b?.name} will send directly from now on`)) } }, 'Turn off drafts')));
+  }
+
+  if (c.type === 'gmail_connect') {
+    if (!pending) return h('div.approval-done', h('span', c.status === 'connected' ? `Gmail connected for the whole team${c.email ? `: ${c.email}` : ''}` : 'Gmail not connected'));
+    return gmailConnectCard((payload) => cardAction(m, payload));
   }
 
   if (c.type === 'hire') {

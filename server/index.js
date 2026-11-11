@@ -22,6 +22,7 @@ import * as toolbox from './toolbox.js';
 import * as squads from './squads.js';
 import * as laptop from './laptop.js';
 import * as accounts from './accounts.js';
+import * as gmail from './gmail.js';
 import * as company from './company.js';
 import * as office from './office.js';
 import * as missions from './missions.js';
@@ -102,7 +103,7 @@ function stateSnapshot() {
 }
 
 // Everything waiting on you, across all chats (approvals, drafts, questions, sign-ins).
-const NEEDS_YOU = new Set(['approval', 'draft', 'question', 'secret', 'connect', 'takeover', 'skill_draft', 'hire']);
+const NEEDS_YOU = new Set(['approval', 'draft', 'question', 'secret', 'connect', 'takeover', 'skill_draft', 'hire', 'gmail_connect']);
 function pendingCards() {
   return all(`SELECT * FROM messages WHERE card IS NOT NULL AND card LIKE '%"status":"pending"%' ORDER BY created DESC LIMIT 100`)
     .map(chats.parseMsg).filter((m) => m.card && m.card.status === 'pending' && NEEDS_YOU.has(m.card.type));
@@ -122,6 +123,7 @@ function publicSettings() {
     toolbox: toolbox.status().state,
     draft_reviews: setting('draft_reviews') === '1',
     company_name: setting('company_name') || '',
+    gmail_email: setting('gmail_email') || '',
     computer_mode: laptop.enabled() ? 'laptop' : 'mac',
     laptops: laptop.status(),
     laptop_folders: (() => { try { return JSON.parse(setting('laptop_folders') || '[]'); } catch { return []; } })(),
@@ -235,6 +237,9 @@ route('PUT', '/api/office/handbook', async (req) => { const b = await readJson(r
 route('POST', '/api/office/reviews', () => ({ bosses: office.runReviews() }));
 route('POST', '/api/company/tasks', async (req) => { const b = await readJson(req); return company.assign({ title: b.title, detail: b.detail, ownerId: b.ownerId, due: b.due, assignedBy: 'user' }); });
 route('PATCH', '/api/company/tasks/:id', async (req, res, p) => { const b = await readJson(req); return b.verdict ? company.review(p.id, { verdict: b.verdict, notes: b.notes, by: 'user' }) : company.update(p.id, { status: b.status, note: b.note, by: 'user' }); });
+route('GET', '/api/gmail', () => ({ connected: gmail.connected(), email: gmail.email() }));
+route('POST', '/api/gmail', async (req) => gmail.connect(await readJson(req)));
+route('DELETE', '/api/gmail', async () => { await gmail.disconnect(); return { ok: true }; });
 route('GET', '/api/accounts', () => accounts.list().map((a) => ({ ...a, source: chats.getBot(a.source_bot)?.name || null })));
 route('PATCH', '/api/accounts/:key', async (req, res, p) => { const b = await readJson(req); accounts.setShared(decodeURIComponent(p.key), b.shared); return { ok: true }; });
 route('DELETE', '/api/accounts/:key', async (req, res, p) => { await accounts.forget(decodeURIComponent(p.key)); return { ok: true }; });
@@ -504,6 +509,7 @@ setInterval(() => office.tickReviews(), 30 * 60e3);
 if (company.org().some((o) => o.reports.length)) office.ensureChannels();
 // Company sign-ins: every Bot's computer gets them when it wakes; keep them fresh.
 accounts.onRefresh((botId) => connectors.refresh(botId));
+if (accounts.list().some((a) => a.key === 'google.com')) accounts.forget('google.com'); // shared Google sessions get signed out
 computer.onBrowserStart((botId) => accounts.applyAll(botId));
 accounts.startKeepFresh(connectors.isConnected);
 // First start on laptops: sign-ins from the old Mac browsers come along (once).

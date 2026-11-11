@@ -943,3 +943,6 @@ button.org-node:hover { border-color: var(--line-2); transform: translateY(-1px)
 
 .more-link { align-self: flex-start; font-size: 12px; color: var(--text-3); padding: 2px 4px; margin-top: 2px; }
 .more-link:hover { color: var(--text); }
+
+.steps-ol { margin: 8px 0 10px; padding-left: 20px; font-size: 13px; color: var(--text-2); display: grid; gap: 4px; }
+.steps-ol a { color: var(--blue, #2563eb); text-decoration: underline; }

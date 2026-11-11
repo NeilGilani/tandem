@@ -17,7 +17,7 @@ function routeFromHash() {
   return name ? { name, id, sub } : { name: 'home' };
 }
 
-const NEEDS_YOU = new Set(['approval', 'draft', 'question', 'secret', 'connect', 'takeover', 'skill_draft', 'hire']);
+const NEEDS_YOU = new Set(['approval', 'draft', 'question', 'secret', 'connect', 'takeover', 'skill_draft', 'hire', 'gmail_connect']);
 const listeners = new Map();
 export function on(evt, fn) { (listeners.get(evt) || listeners.set(evt, new Set()).get(evt)).add(fn); }
 export function fire(evt, data) { for (const fn of listeners.get(evt) || []) fn(data); }

@@ -21,6 +21,7 @@ import * as laptop from './laptop.js';
 import * as accounts from './accounts.js';
 import * as company from './company.js';
 import * as office from './office.js';
+import * as gmail from './gmail.js';
 
 let engine = null;
 export const attach = (e) => { engine = e; };
@@ -72,6 +73,11 @@ export const DEFS = [
   ['mission_checkpoint', 'End a mission work session. Record what you did and decide what happens next: continue right away, wait until a time, blocked on the user, or done.',
     S({ note: str('What you did this session and where you left off (your future self reads this)'), next: { type: 'string', enum: ['continue', 'wait', 'blocked', 'done'] },
       wait_until: str('ISO date-time to wake up, when next="wait"'), wait_reason: str('What you will do when you wake up'), blocked_reason: str('What you need from the user, when next="blocked"'), summary: str('Final summary of results, when next="done"') }, ['note', 'next'])],
+  ['gmail_search', "Search the user's Gmail with Gmail search syntax (from:, to:, subject:, is:unread, newer_than:7d, in:inbox, has:attachment…). Returns id, sender, subject, date, unread and a snippet. Works for every Bot at once; never open Gmail in the browser.",
+    S({ query: str('Gmail search, e.g. "in:inbox is:unread newer_than:2d"'), limit: num('Max results (default 15, up to 50)') })],
+  ['gmail_read', 'Read one email in full by its id from gmail_search: sender, recipients, subject, text, attachments and the Message-ID to reply to.', S({ id: num('Email id') }, ['id'])],
+  ['gmail_update', 'Organize an email by id: archive it, mark it read or unread, star it, or add or remove a label.',
+    S({ id: num('Email id'), archive: bool(''), read: bool(''), star: bool(''), add_label: str(''), remove_label: str('') }, ['id'])],
   ['team_status', "See what every Bot on the team is doing right now: who is working and on what step, their current mission and plan progress, open assignments, and their last few actions. Use it instead of asking teammates for a status.", S({})],
   ['discard_draft', 'Drop one of your own drafts that is no longer needed (by recipient). The user stops seeing it.', S({ to: str('The recipient of the draft to drop') }, ['to'])],
   ['post_to_channel', 'Post in a team channel (like #general or your department channel): updates, wins, questions for the team, blockers. @Name a teammate to get their reply in the channel.',
@@ -166,6 +172,8 @@ export function resolveCard(msgId, payload) {
     if (w) { waiters.delete(msgId); w(value); }
   };
   switch (card.type) {
+    case 'gmail_connect':
+      return gmail.connect({ address: payload.address, appPassword: payload.appPassword }).then((r) => { card.email = r.email; done('connected', { connected: true }); return true; });
     case 'hire': {
       if (payload.decline) { done('declined', {}); engine.runInOffice(card.boss, `[Neil declined hiring a ${card.role}]${payload.note ? ` ${payload.note}` : ''}`, { origin: 'handoff' }).catch(() => {}); return true; }
       const nb = chats.createBot({ name: (payload.name || card.name || card.role).trim(), label: card.role });
@@ -197,6 +205,17 @@ export function resolveCard(msgId, payload) {
       if (payload.action === 'discard') return done('discarded');
       const draft = { ...card, ...(payload.edits || {}) };
       Object.assign(card, payload.edits || {});
+      // Email with Gmail connected: Tandem sends it through Gmail itself, right away.
+      if (gmail.connected() && /gmail|e-?mail|^mail$/i.test(draft.app || 'Email') && /@/.test(draft.to || '')) {
+        return (async () => {
+          const inReplyTo = draft.thread ? await gmail.replyTarget(draft.thread, draft.to).catch(() => null) : null;
+          await gmail.send({ to: draft.to, cc: draft.cc, subject: draft.subject, body: draft.body, inReplyTo });
+          card.sentAt = now();
+          done('sent');
+          activity.log({ botId: msg.bot_id, chatId: msg.chat_id, kind: 'tool', tool: 'gmail_send', summary: `Sent email to ${draft.to}`, detail: draft.subject || '', status: 'ok', origin: 'chat' });
+          return true;
+        })();
+      }
       done('sent');
       engine.runBot(msg.bot_id, msg.chat_id,
         `The user pressed Send on your ${draft.app} draft. Send it now exactly as written below, then confirm briefly.\n` +
@@ -292,6 +311,9 @@ export async function call(tool, args = {}, ctx) {
 
   switch (tool) {
     case 'site_fetch': return siteFetch(args, ctx);
+    case 'gmail_search': if (!gmail.connected()) return 'Gmail is not connected yet. Call request_connect with "Gmail".'; return gmail.search(args.query || 'in:inbox', args.limit);
+    case 'gmail_read': if (!gmail.connected()) return 'Gmail is not connected yet. Call request_connect with "Gmail".'; return gmail.read(args.id);
+    case 'gmail_update': if (!gmail.connected()) return 'Gmail is not connected yet.'; return gmail.update(args.id, { archive: args.archive, read: args.read, star: args.star, addLabel: args.add_label, removeLabel: args.remove_label });
     case 'team_status': {
       const runs = engine.activeRuns();
       const ms = missions.list();
@@ -407,6 +429,12 @@ export async function call(tool, args = {}, ctx) {
     case 'request_connect': {
       const app = findApp(args.app);
       if (!app) return `"${args.app}" isn't in the catalog. The user can add any MCP server as a custom app under Connect apps.`;
+      if (app.id === 'gmail') {
+        if (gmail.connected()) return `Gmail (${gmail.email()}) is connected. Use gmail_search, gmail_read and gmail_update, and draft_message for anything outgoing. Don't use the browser for Gmail.`;
+        const msg = postCard(ctx, { type: 'gmail_connect', title: 'Connect Gmail for your whole team', name: 'Gmail' });
+        const res = await waitCard(msg.id, ctx);
+        return res.connected ? `Gmail is connected for the whole team. Use gmail_search, gmail_read and gmail_update.` : 'The user didn\'t connect Gmail yet.';
+      }
       const row = connectors.add(app.id);
       let c = connectors.installed(ctx.botId).find((x) => x.id === row.id);
       if (c.status === 'Connected') {
@@ -423,6 +451,9 @@ export async function call(tool, args = {}, ctx) {
       return res.connected ? `${app.name} is connected. Continue.` : res.expired ? 'The Connect card expired.' : `The user didn't connect ${app.name}.`;
     }
     case 'request_takeover': {
+      if (gmail.connected() && /\b(gmail|google|inbox|mail)\b/i.test(args.reason || '') && /sign|log ?in|signed out|account chooser/i.test(args.reason || '')) {
+        return `Don't sign in to Gmail in the browser: Gmail (${gmail.email()}) is connected for the whole team. Use gmail_search, gmail_read and gmail_update, and draft_message to send.`;
+      }
       const msg = postCard(ctx, { type: 'takeover', reason: args.reason, title: 'Take over the computer' });
       computer.startTakeover({ reason: args.reason, botId: ctx.botId, chatId: msg.chat_id });
       computer.bringToFront(ctx.botId).catch(() => {});

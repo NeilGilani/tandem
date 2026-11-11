@@ -9,11 +9,13 @@ import { CATALOG, byId } from './catalog.js';
 import * as computer from './computer.js';
 import { emit } from './bus.js';
 import * as accounts from './accounts.js';
+import * as gmail from './gmail.js';
 
 const rows = () => all('SELECT * FROM connectors ORDER BY added').map((r) => parseRow(r, ['config']));
 
 function statusFor(botId, c) {
   if (c.catalog_id === 'custom' || byId[c.catalog_id]?.kind === 'mac') return 'Connected';
+  if (c.catalog_id === 'gmail') return gmail.connected() ? 'Connected' : 'Added';
   if (!botId) return c.status;
   return get('SELECT status FROM connector_status WHERE bot_id = ? AND connector_id = ?', botId, c.id)?.status || 'Added';
 }
@@ -127,6 +129,7 @@ export function promptBlock(botId) {
   if (!list.length) return 'No apps are connected yet. If a task needs one, call request_connect with the app name.';
   return list.map((c) => {
     if (c.catalog_id === 'custom') return `- ${c.name} (custom MCP app). Its tools are available under mcp__${mcpName(c)}__*`;
+    if (c.catalog_id === 'gmail') return gmail.connected() ? `- Gmail [Connected for the whole team: ${gmail.email()}]: use gmail_search, gmail_read and gmail_update, and draft_message to send. Never open Gmail in the browser.` : '- Gmail [Not connected]: call request_connect with "Gmail".';
     const where = c.kind === 'mac' ? `native tools: ${c.tools.join(', ')}` : `use in your browser at ${c.url}`;
     return `- ${c.name} [${c.status} on your computer]: ${where}. ${c.tips || ''}`;
   }).join('\n');
