@@ -75,7 +75,7 @@ let es;
 export function connectEvents() {
   es?.close();
   es = new EventSource('/api/events');
-  const refreshing = new Set(['bots', 'chats', 'connectors', 'settings']);
+  const refreshing = new Set(['bots', 'chats', 'connectors', 'settings', 'members']);
   for (const t of refreshing) es.addEventListener(t, () => refresh());
   es.addEventListener('message', (e) => {
     const m = JSON.parse(e.data);

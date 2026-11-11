@@ -208,7 +208,7 @@ export async function renderTemplates($main) {
 export async function renderSettings($main, r) {
   const t = r.id || 'general';
   const st = await api('GET', '/api/settings');
-  const tabs = h('div.tabs', [['general', 'General'], ['computer', 'Computer'], ['vault', 'Vault'], ['devices', 'Devices'], ['usage', 'Usage']].map(([k, l]) =>
+  const tabs = h('div.tabs', [['general', 'General'], ['team', 'Team'], ['computer', 'Computer'], ['vault', 'Vault'], ['devices', 'Devices'], ['usage', 'Usage']].map(([k, l]) =>
     h(`button${t === k ? '.on' : ''}`, { on: { click: () => go(`#/settings/${k}`) } }, l)));
   const patch = (p) => api('PATCH', '/api/settings', p).then(() => renderSettings($main, r)).catch((e) => toast(e.message, 'bad'));
   let content;
@@ -311,6 +311,8 @@ export async function renderSettings($main, r) {
         : h('div.card', { style: { maxWidth: 'none' } }, h('div.card-b', h('div', 'Phone access is off. Restart Tandem with network access:'), h('pre', 'tandem start --lan'),
           h('div.hint', 'Away from home, put this Mac and your phone on the same Tailscale network and use its Tailscale address.'))),
     ];
+  } else if (t === 'team') {
+    content = await teamSettings(st, () => renderSettings($main, r));
   } else if (t === 'usage') {
     const u = await api('GET', '/api/usage');
     const guardAt = h('select.select', { style: { width: 'auto' } }, [[0.8, '80%'], [0.9, '90%'], [0.95, '95%']].map(([v, l]) => h('option', { value: v, selected: Math.abs(st.usage_guard_at - v) < 0.001 }, l)));
@@ -410,4 +412,44 @@ export function planBars(plan, { compact = false } = {}) {
         h('div', { style: { width: `${Math.min(pct, 100)}%`, height: '100%', background: color, borderRadius: '99px' } })));
   };
   return h('div', { style: { display: 'grid', gap: compact ? '6px' : '12px' } }, bar('5-hour limit', plan.fiveHour), bar('Weekly limit', plan.week));
+}
+
+// ---- Team: share your Bots with a cofounder ------------------------------------------------
+const linkModal = (name, links, lan) => modal({ title: `${name}'s sign-in link`, body: [
+  lan && links.length ? [h('p.hint', `Send this to ${name} privately. It works once they're on your Tailscale network (or the same Wi-Fi). It's the only time it's shown; you can make a new one later.`),
+    links.map((u) => h('div.copy-field', h('input.input', { value: u, readOnly: true }), h('button.btn', { on: { click: () => { navigator.clipboard.writeText(u); toast('Copied'); } } }, 'Copy'))),
+    links.length > 1 ? h('p.hint', 'Use the 100.x address for Tailscale, the 192.168 / 10.x one on the same Wi-Fi.') : null]
+    : [h('p', 'Network access is off, so no one else can reach Tandem yet. Restart it with:'), h('pre', 'tandem install --lan'), h('p.hint', 'Then come back here and press New link next to their name.')],
+], actions: [{ label: 'Done', primary: true }] });
+
+async function teamSettings(st, rerender) {
+  if (!S.me?.owner) return [h('h2', 'Team'), h('p.hint', `You're signed in as ${S.me?.name}. ${S.settings.user_name?.split(' ')[0] || 'The owner'} manages who's on the team and how Bot work is paid for.`)];
+  const { members, lan } = await api('GET', '/api/members');
+  const name = h('input.input', { placeholder: 'Their name, e.g. Sam', style: { maxWidth: '240px' } });
+  const add = async () => {
+    if (!name.value.trim()) return name.focus();
+    try { const r = await api('POST', '/api/members', { name: name.value.trim() }); linkModal(r.member.name, r.links, r.lan); rerender(); } catch (e) { toast(e.message, 'bad'); }
+  };
+  const key = h('input.input', { type: 'password', placeholder: 'sk-ant-…', autocomplete: 'off', style: { maxWidth: '320px' } });
+  const api_on = st.billing?.mode === 'api';
+  return [
+    h('h2', 'People'),
+    h('p.hint', 'Teammates use the same Bots from their own computer or phone. Their requests carry their name, and the Bots\' questions about their requests go to them. Only you can send from your accounts, connect apps, see saved logins, take over a laptop, or change settings.'),
+    h('div.list',
+      h('div.list-row', icon('users'), h('div.grow', `${st.user_name} (you)`, h('small', 'Owner'))),
+      members.map((m) => h('div.list-row', icon('users'), h('div.grow', m.name, h('small', `${m.role} · ${m.last_seen ? `last active ${time(m.last_seen)}` : 'hasn\'t signed in yet'}`)),
+        h('button.btn.ghost', { on: { click: async () => { const r = await api('POST', `/api/members/${m.id}/link`); linkModal(m.name, r.links, r.lan); } } }, 'New link'),
+        h('button.btn.ghost.danger', { on: { click: async () => { if (await confirm(`Remove ${m.name}? Their link stops working right away.`, { label: 'Remove' })) { await api('DELETE', `/api/members/${m.id}`); rerender(); } } } }, 'Remove')))),
+    h('div.hstack', { style: { marginTop: '10px' } }, name, h('button.btn.primary', { on: { click: add } }, 'Add teammate')),
+    !lan && h('p.hint', { style: { marginTop: '8px' } }, 'Network access is off. Run tandem install --lan so teammates can reach this Mac (use Tailscale when you\'re not on the same Wi-Fi).'),
+    h('h2', 'Who pays for Bot work'),
+    h('p.hint', 'A Claude Pro or Max plan is for one person. When teammates use your Bots, run them on a company Anthropic API key instead. It bills per use, so set a monthly limit in console.anthropic.com.'),
+    h('div.list',
+      h('div.list-row', h('div.grow', 'Your Claude plan', h('small', 'Fine while only you use the Bots.')), api_on ? h('button.btn', { on: { click: () => api('POST', '/api/billing', { mode: 'plan' }).then(rerender).catch((e) => toast(e.message, 'bad')) } }, 'Switch back') : h('span.hint', 'In use')),
+      h('div.list-row', h('div.grow', 'Company API key', h('small', api_on ? `In use · ${st.billing.key_hint}` : st.billing?.key_hint ? `Saved · ${st.billing.key_hint}` : 'Stored in your Mac Keychain; Bots never see it.')),
+        api_on ? h('span.hint', 'In use') : st.billing?.key_hint ? h('button.btn', { on: { click: () => api('POST', '/api/billing', { mode: 'api' }).then(rerender).catch((e) => toast(e.message, 'bad')) } }, 'Use it') : null)),
+    h('div.hstack', { style: { marginTop: '10px' } }, key, h('button.btn', { on: { click: async () => {
+      try { await api('POST', '/api/billing', { mode: 'api', apiKey: key.value }); toast('Bots now run on the company key'); rerender(); } catch (e) { toast(e.message, 'bad'); }
+    } } }, api_on ? 'Replace key' : 'Save and use')),
+  ];
 }

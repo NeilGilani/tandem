@@ -168,7 +168,7 @@ function taskModal(t) {
     { label: 'Approve', primary: true, onClick: async () => { await api('PATCH', `/api/company/tasks/${t.id}`, { verdict: 'approve' }); renderCompany(document.getElementById('main')); } });
   else actions.push({ label: 'Close' });
   modal({ title: t.title, wide: true, body: [
-    h('div.hint', `${bot(t.owner_id)?.name || 'A Bot'} · from ${t.assigned_by === 'user' ? 'you' : bot(t.assigned_by)?.name || 'its boss'}${t.due ? ` · due ${t.due}` : ''} · ${t.status}`),
+    h('div.hint', `${bot(t.owner_id)?.name || 'A Bot'} · from ${t.assigned_by === 'user' ? (S.me?.owner === false ? S.settings.user_name : 'you') : t.assigned_by === S.me?.id ? 'you' : /^mem_/.test(t.assigned_by) ? (S.members || []).find((x) => x.id === t.assigned_by)?.name || 'a teammate' : bot(t.assigned_by)?.name || 'its boss'}${t.due ? ` · due ${t.due}` : ''} · ${t.status}`),
     t.detail && h('div.md', { html: md(t.detail) }),
     t.result && [h('div.group-h', 'Result'), h('div.md', { html: md(t.result) })],
     notes.length ? [h('div.group-h', 'Notes'), h('div.notes', notes.map((n) => h('div.note', h('div.hint', `${new Date(n.at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })} · ${n.by === 'user' ? 'You' : bot(n.by)?.name || 'A Bot'}`), h('div', n.text))))] : null,

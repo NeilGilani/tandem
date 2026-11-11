@@ -9,6 +9,7 @@ import * as chats from './chats.js';
 import * as memory from './memory.js';
 import * as company from './company.js';
 import * as missions from './missions.js';
+import { ownerFirst } from './members.js';
 
 let engine = null;
 export const attach = (e) => { engine = e; };
@@ -33,20 +34,21 @@ async function route(text) {
   } catch { return { owner: chief, title: text.slice(0, 80) }; }
 }
 
-export async function ask(text) {
+export async function ask(text, who = { id: 'user', owner: true }) {
+  const boss = ownerFirst();
   text = String(text || '').trim();
   if (!text) throw new Error('Say what you want done');
   const { owner, title } = await route(text);
-  const t = company.assign({ title, detail: text, ownerId: owner.id, assignedBy: 'user', wake: false });
+  const t = company.assign({ title, detail: text, ownerId: owner.id, assignedBy: who.id, wake: false });
   run("UPDATE tasks SET status = 'doing' WHERE id = ?", t.id);
   emit('company');
-  engine.runInOffice(owner.id, `[Request from Neil, the founder] ${text}
+  engine.runInOffice(owner.id, `${who.owner ? `[Request from ${boss}, the founder]` : `[Request from ${who.name}, ${who.role || 'cofounder'} (not ${boss})]`} ${text}
 
 Do it now. When it's finished, call submit_task with id ${t.id} and a ONE-LINE result (under 140 characters) that says what
 happened and the number or link that matters, like "Sent 3 intros; Farmhand replied" or "Shortlist ready: 15 sites, top 3 have power".
-If you need Neil's decision, use ask_user with 2 to 4 short options (one tap each). Don't explain your process anywhere.`,
-  { origin: 'handoff', taskId: t.id }).catch(() => {});
-  return { id: t.id, title, owner: owner.name, ownerId: owner.id };
+If you need ${who.owner ? boss : who.name}'s decision, use ask_user with 2 to 4 short options (one tap each). Don't explain your process anywhere.`,
+  { origin: 'handoff', taskId: t.id, ...(who.owner ? {} : { by: who.id }) }).catch(() => {});
+  return { id: t.id, title, owner: owner.name, ownerId: owner.id, by: who.id };
 }
 
 // A request whose Bot finished without reporting: close it with a one-line result.
@@ -60,14 +62,16 @@ export async function closeIfOpen(taskId, text) {
 }
 
 // The feed: what's being worked on, what's finished, and today's brief.
+const byPerson = (a) => a === 'user' || /^mem_/.test(a || '');
+
 export function feed() {
   const runs = engine.activeRuns();
   const dayStart = new Date(new Date().toLocaleString('en-US', { timeZone: timezone() })).setHours(0, 0, 0, 0) - 0;
   const since = Math.min(dayStart, now() - 18 * 3600e3);
   const name = (id) => chats.getBot(id)?.name || 'A Bot';
-  const working = company.tasks({ open: true }).filter((t) => t.assigned_by === 'user').map((t) => {
+  const working = company.tasks({ open: true }).filter((t) => byPerson(t.assigned_by)).map((t) => {
     const r = runs.find((x) => x.botId === t.owner_id);
-    return { kind: 'task', id: t.id, title: t.title, botId: t.owner_id, bot: name(t.owner_id), line: r ? r.status : t.status === 'blocked' ? 'Blocked' : 'Queued', live: !!r, created: t.created };
+    return { kind: 'task', id: t.id, title: t.title, botId: t.owner_id, bot: name(t.owner_id), by: t.assigned_by, line: r ? r.status : t.status === 'blocked' ? 'Blocked' : 'Queued', live: !!r, created: t.created };
   });
   for (const m of missions.list().filter((x) => ['active', 'waiting', 'blocked'].includes(x.status))) {
     const r = runs.find((x) => x.botId === m.bot_id && x.origin === 'mission');
@@ -76,7 +80,7 @@ export function feed() {
       line: r ? r.status : m.status === 'blocked' ? `Needs you: ${m.block_reason || 'a decision'}` : last ? last.text.split(/(?<=\.)\s/)[0].slice(0, 140) : 'Planning' });
   }
   const done = all("SELECT * FROM tasks WHERE status = 'done' AND done_at > ? ORDER BY done_at DESC LIMIT 30", since)
-    .map((t) => ({ kind: 'task', id: t.id, title: t.title, result: (t.result || '').split('\n')[0].slice(0, 200), botId: t.owner_id, bot: name(t.owner_id), at: t.done_at }));
+    .map((t) => ({ kind: 'task', id: t.id, title: t.title, result: (t.result || '').split('\n')[0].slice(0, 200), botId: t.owner_id, bot: name(t.owner_id), by: byPerson(t.assigned_by) ? t.assigned_by : null, at: t.done_at }));
   const sent = all("SELECT bot_id, summary, created FROM actions WHERE tool = 'gmail_send' AND created > ? ORDER BY created DESC LIMIT 20", since)
     .map((a) => ({ kind: 'sent', title: a.summary, botId: a.bot_id, bot: name(a.bot_id), at: a.created }));
   const chief = chats.listBots().find((b) => /chief/i.test(b.title || ''));

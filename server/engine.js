@@ -18,6 +18,7 @@ import * as laptop from './laptop.js';
 import os from 'node:os';
 import * as memory from './memory.js';
 import * as activity from './activity.js';
+import { ownerFirst } from './members.js';
 
 export let PORT = 4747;
 export const setPort = (p) => { PORT = p; };
@@ -555,6 +556,17 @@ export const activeRuns = () => [...active.values()].map(publicRun);
 
 // ---- Entry points -------------------------------------------------------------------
 
+// Who a run is working for: Neil ('user') or a teammate. Their decision cards go to them.
+// Anything that uses the owner's accounts (sending, sign-ins, hires) always goes to the owner.
+const OWNER_CARDS = new Set(['draft', 'gmail_connect', 'connect', 'secret', 'hire', 'skill_draft', 'takeover']);
+export function requesterFor(botId, chatId, card) {
+  if (card && OWNER_CARDS.has(card.type)) return 'user';
+  const runs = [...active.values()].filter((r) => r.botId === botId);
+  const r = runs.find((x) => x.chatId === chatId) || runs[0];
+  return r?.opts?.by || 'user';
+}
+chats.setCardOwner(requesterFor);
+
 export function runInOffice(botId, text, opts = {}) {
   return runBot(botId, chats.officeFor(botId).id, text, opts);
 }
@@ -568,8 +580,10 @@ export function runInDm(botId, text, opts = {}) {
 // or the Bots that decide it's for them.
 export async function onUserMessage(chatId, msg) {
   const chat = chats.getChat(chatId);
-  const opts = { origin: 'chat', attachments: msg.attachments || [], parentId: msg.parent_id || null };
+  const by = msg.meta?.by;
+  const opts = { origin: 'chat', attachments: msg.attachments || [], parentId: msg.parent_id || null, ...(by ? { by: by.id } : {}) };
   let text = msg.meta?.voice ? `[Voice call] ${msg.text}` : msg.text;
+  if (by) text = `[From ${by.name}, ${by.role || 'cofounder'}, not ${ownerFirst()}] ${text}`;
   if (msg.parent_id) {
     const parent = chats.getMessage(msg.parent_id);
     if (parent) text = `[Replying in a thread to: "${(parent.text || parent.card?.summary || '').slice(0, 400)}"]\n${text}`;

@@ -5,6 +5,7 @@ import { S, bot, dmOf, go, on } from './store.js';
 import { openInboxAt } from './inbox.js';
 
 let feed = { working: [], done: [], brief: null };
+const me = () => (S.me?.owner === false ? S.me.name : S.settings.user_name) || '';
 let $root = null;
 let briefOpen = false;
 let $box = null;
@@ -22,15 +23,16 @@ function draw() {
   if (!$root || S.route.name !== 'home' || S.route.id || !$root.isConnected) return;
   const calls = decisions();
   const hour = new Date().getHours();
-  const hello = `${hour < 12 ? 'Morning' : hour < 18 ? 'Afternoon' : 'Evening'}${S.settings.user_name ? `, ${S.settings.user_name.split(' ')[0]}` : ''}`;
+  const hello = `${hour < 12 ? 'Morning' : hour < 18 ? 'Afternoon' : 'Evening'}${me() ? `, ${me().split(' ')[0]}` : ''}`;
   $root.replaceChildren(h('div.page.cx', h('div.page-in',
     h('div.cx-hello', h('h1', hello), h('span.hint', S.bots.length ? `${S.runs.filter((r) => !r.squadId).length} working · ${S.bots.length} on the team` : ''), h('a.hint.cx-dash', { href: '#/home/board' }, 'Full dashboard')),
     ($box ||= askBox()),
-    feed.brief && h('div.cx-brief', h('button.cx-brief-h', { on: { click: () => { briefOpen = !briefOpen; draw(); } } }, icon('sparkle'), h('b', 'Morning brief'), h('span.hint', `${feed.brief.bot} · ${ago(feed.brief.at)} ago`), h('span.cx-brief-t', briefOpen ? 'Hide' : 'Read')),
+    feed.brief && h('div.cx-brief', h('button.cx-brief-h', { on: { click: () => { briefOpen = !briefOpen; draw(); } } }, icon('sparkle'), h('b', 'Morning brief'), h('span.hint', `${feed.brief.bot} · ${ago(feed.brief.at) === 'now' ? 'just now' : `${ago(feed.brief.at)} ago`}`), h('span.cx-brief-t', briefOpen ? 'Hide' : 'Read')),
       briefOpen && h('div.md.cx-brief-b', { html: md(feed.brief.text) })),
     h('div.cx-cols',
       h('section.cx-decide', h('div.cx-h', icon('hand'), 'Needs your call', calls.length ? h('span.cx-n', String(calls.length)) : null),
-        calls.length ? calls : h('div.cx-empty', 'Nothing needs you. Your team is handling it.')),
+        calls.length ? calls : h('div.cx-empty', 'Nothing needs you. Your team is handling it.'),
+        waitingOn()),
       h('section.cx-results',
         feed.working.length > 0 && [h('div.cx-h', icon('activity'), 'In progress'), h('div.cx-rows', feed.working.map(workRow))],
         h('div.cx-h', icon('check'), 'Done today'),
@@ -70,8 +72,13 @@ function askBox() {
 }
 
 // ---- Decisions: one question, a few taps ----------------------------------------------
+// Cards are for whoever asked: the owner gets theirs plus anything unassigned; a teammate gets theirs.
+const mine = (m) => { const f = m.card.for || 'user'; return S.me?.owner ? f === 'user' || !personName(f) : f === S.me?.id; };
+const personName = (id) => (id === 'user' ? S.settings.user_name : (S.members || []).find((x) => x.id === id)?.name);
+const forOthers = () => (S.pending || []).filter((m) => bot(m.bot_id) && !mine(m));
+
 function decisions() {
-  const items = (S.pending || []).filter((m) => bot(m.bot_id));
+  const items = (S.pending || []).filter((m) => bot(m.bot_id) && mine(m));
   const out = [];
   const drafts = items.filter((m) => m.card.type === 'draft');
   const byBot = new Map();
@@ -111,18 +118,28 @@ function dcard(botId, q, sub, buttons, extra) {
     h('div.cx-card-btns', buttons.map(([label, primary, fn]) => h(`button.btn.sm${primary ? '.primary' : ''}`, { on: { click: async (e) => { e.currentTarget.disabled = true; await fn(); } } }, label))));
 }
 
+// Teammates' open questions, so you can see what's held up on them.
+function waitingOn() {
+  const counts = new Map();
+  for (const m of forOthers()) { const n = (personName(m.card.for || 'user') || 'someone').split(' ')[0]; counts.set(n, (counts.get(n) || 0) + 1); }
+  if (!counts.size) return null;
+  return h('div.cx-wait', [...counts].map(([n, c]) => `${c} waiting on ${n}`).join(' · '));
+}
+// "for Sam" on requests someone else made.
+const by = (id) => { if (!id) return ''; const me = S.me?.owner ? 'user' : S.me?.id; return id === me ? '' : ` · for ${(personName(id) || 'a teammate').split(' ')[0]}`; };
+
 // ---- Results --------------------------------------------------------------------------
 function workRow(w) {
   const r = S.runs.find((x) => x.botId === w.botId && !x.squadId);
   if (r) { w.live = true; w.line = r.status || w.line; }
   return h('button.cx-row', { on: { click: () => go(`#/chat/${dmOf(w.botId)?.id}`) } },
     h(`span.cx-ic${w.live ? '.live' : ''}`, w.live ? icon('refresh') : icon(w.kind === 'mission' ? 'target' : 'activity')),
-    h('div.cx-t', h('b', w.title), h('span', `${w.bot} · ${w.line}`)));
+    h('div.cx-t', h('b', w.title), h('span', `${w.bot}${by(w.by)} · ${w.line}`)));
 }
 function doneRow(d) {
   return h('button.cx-row', { on: { click: () => details(d) } },
     h('span.cx-ic.done', icon(d.kind === 'sent' ? 'send' : 'check')),
-    h('div.cx-t', h('b', d.title), d.result && h('span.cx-r', d.result), h('span', `${d.bot} · ${ago(d.at)} ago`)));
+    h('div.cx-t', h('b', d.title), d.result && h('span.cx-r', d.result), h('span', `${d.bot}${by(d.by)} · ${ago(d.at) === 'now' ? 'just now' : `${ago(d.at)} ago`}`)));
 }
 function details(d) {
   modal({ title: d.title, body: [h('div', d.result || ''), h('div.hint', `${d.bot} · ${new Date(d.at).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}`)],

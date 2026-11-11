@@ -150,8 +150,12 @@ export const setSession = (chatId, botId, sid) =>
 const MSG_JSON = ['reactions', 'card', 'attachments', 'meta'];
 export const parseMsg = (m) => parseRow(m, MSG_JSON);
 
+let cardOwner = null;
+export const setCardOwner = (fn) => { cardOwner = fn; };
+
 export function addMessage({ chatId, author, botId = null, text = '', parentId = null, card = null, attachments = [], meta = {} }) {
   const id = uid('msg_');
+  if (card && card.for === undefined && botId && cardOwner) card = { ...card, for: cardOwner(botId, chatId, card) };
   run(`INSERT INTO messages (id, chat_id, author, bot_id, text, parent_id, card, attachments, meta, created) VALUES (?,?,?,?,?,?,?,?,?,?)`,
     id, chatId, author, botId, text, parentId, card ? JSON.stringify(card) : null, JSON.stringify(attachments), JSON.stringify(meta), now());
   run('UPDATE chats SET updated = ? WHERE id = ?', now(), chatId);

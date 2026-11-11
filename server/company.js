@@ -6,6 +6,7 @@ import { db, all, get, run, uid, now, setting, timezone, parseRow } from './db.j
 import { emit } from './bus.js';
 import * as chats from './chats.js';
 import * as activity from './activity.js';
+import * as members from './members.js';
 
 for (const col of ['title TEXT', 'boss_id TEXT']) { try { db.exec(`ALTER TABLE bots ADD COLUMN ${col}`); } catch {} }
 db.exec(`
@@ -23,7 +24,8 @@ export const attach = (e) => { engine = e; };
 
 export const companyName = () => setting('company_name') || '';
 const today = () => new Date().toLocaleDateString('en-CA', { timeZone: timezone() });
-const name = (id) => (id === 'user' || !id ? 'You' : chats.getBot(id)?.name || 'A Bot');
+const isPerson = (id) => id === 'user' || /^mem_/.test(id || '');
+const name = (id) => (id === 'user' || !id ? 'You' : /^mem_/.test(id) ? members.byId(id)?.name || 'A teammate' : chats.getBot(id)?.name || 'A Bot');
 
 // ---- Org ---------------------------------------------------------------------------------
 export const bossOf = (botId) => { const b = chats.getBot(botId); return b?.boss_id ? chats.getBot(b.boss_id) : null; };
@@ -60,7 +62,7 @@ export function assign({ title, detail = '', ownerId, assignedBy = 'user', due =
   const owner = chats.getBot(ownerId) || chats.findBot(ownerId);
   if (!owner) throw new Error(`No Bot named ${ownerId}`);
   if (!String(title || '').trim()) throw new Error('An assignment needs a title');
-  if (assignedBy !== 'user') {
+  if (!isPerson(assignedBy)) {
     const ok = owner.boss_id === assignedBy || chats.getBot(assignedBy)?.title?.match(/chief|ceo|head/i);
     if (!ok) throw new Error(`${owner.name} doesn't report to you. Ask their boss, or message them with message_bot.`);
   }
@@ -102,7 +104,7 @@ export function submit(id, { result, by }) {
   run("UPDATE tasks SET status = 'done', done_at = ? WHERE id = ?", now(), id);
   activity.log({ botId: t.owner_id, kind: 'task', summary: `Done: ${t.title}`, status: 'ok', origin: 'company' });
   emit('company');
-  if (t.assigned_by === 'user') emit('notify', { botId: t.owner_id, title: `${name(t.owner_id)} finished`, body: t.title });
+  if (isPerson(t.assigned_by)) emit('notify', { botId: t.owner_id, title: `${name(t.owner_id)} finished`, body: t.title });
   return 'Done.';
 }
 

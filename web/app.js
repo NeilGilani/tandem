@@ -38,7 +38,7 @@ const dayLabel = (ts) => {
   return `${d.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })} ${t}`;
 };
 const chipFor = (b) => b ? h('span.chip', avatar(b, 16), b.name) : null;
-const userName = () => S.settings.user_name || 'You';
+const userName = () => (S.me?.owner === false ? S.me.name : S.settings.user_name) || 'You';
 const seenKey = (id) => `tandem.seen.${id}`;
 const getSeen = (id) => { try { return Number(localStorage.getItem(seenKey(id)) || 0); } catch { return 0; } };
 const markSeen = (id) => { try { localStorage.setItem(seenKey(id), String(Date.now())); } catch {} };
@@ -351,6 +351,13 @@ function messageRow(m, prev, isGroup, { inThread = false } = {}) {
   if (fresh) [el].flat().filter(Boolean).forEach((x) => x.classList?.add('enter'));
   return el;
 }
+// With teammates, a message someone else sent shows their name above it.
+function senderLabel(m) {
+  const from = m.meta?.by?.id || 'user';
+  const viewer = S.me?.owner === false ? S.me.id : 'user';
+  if (from === viewer) return null;
+  return h('div.sender-lbl', from === 'user' ? (S.settings.user_name || 'Owner') : m.meta.by.name);
+}
 function messageRowInner(m, prev, isGroup, { inThread = false } = {}) {
   if (m.author === 'system') return sysLine(m);
   const me = m.author === 'user';
@@ -358,6 +365,7 @@ function messageRowInner(m, prev, isGroup, { inThread = false } = {}) {
   const showSideAv = isGroup && !me;
   const col = h('div.col',
     me ? [
+      senderLabel(m),
       m.text ? h('div.bubble', { textContent: m.text }) : null,
       m.attachments?.length ? h('div.attach-list', m.attachments.map((a) => /\.(png|jpe?g|gif|webp)$/i.test(a.name)
         ? h('a.attach', { href: fileUrl(a.path), target: '_blank' }, h('img', { src: fileUrl(a.path), alt: a.name }))

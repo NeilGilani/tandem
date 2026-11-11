@@ -24,6 +24,7 @@ import * as laptop from './laptop.js';
 import * as accounts from './accounts.js';
 import * as gmail from './gmail.js';
 import * as command from './command.js';
+import * as members from './members.js';
 import * as company from './company.js';
 import * as office from './office.js';
 import * as missions from './missions.js';
@@ -58,8 +59,23 @@ const readBody = (req, limit = 30 << 20) => new Promise((resolve, reject) => {
 const readJson = async (req) => { const b = await readBody(req); return b.length ? JSON.parse(b.toString()) : {}; };
 
 function isLocal(req) {
+  // Anything relayed through a proxy (tailscale serve, a tunnel) is not this Mac.
+  if (req.headers['x-forwarded-for'] || req.headers['tailscale-user-login'] || req.headers['cf-connecting-ip']) return false;
   const a = req.socket.remoteAddress || '';
   return a === '127.0.0.1' || a === '::1' || a === '::ffff:127.0.0.1';
+}
+const reqToken = (req) => {
+  const h = req.headers.authorization || '';
+  if (h.startsWith('Bearer ')) return h.slice(7);
+  const cookie = (req.headers.cookie || '').split(/;\s*/).find((c) => c.startsWith('tandem_token='));
+  return cookie ? cookie.slice(13) : '';
+};
+// You (this Mac, or your own link) or a teammate with theirs.
+function whoIs(req) {
+  const m = members.fromToken(reqToken(req));
+  if (m) return { ...m, owner: false };
+  if (isLocal(req) || authed(req)) return members.owner(setting('user_name') || os.userInfo().username);
+  return null;
 }
 function authed(req) {
   const token = setting('access_token');
@@ -120,8 +136,9 @@ function lastPreview(chatId) {
   return { author: m.author, bot_id: m.bot_id, text: String(text || '').replace(/[`*#>_]+/g, '').slice(0, 140), created: m.created };
 }
 
-function publicSettings() {
+function publicSettings(who = { owner: true }) {
   return {
+    billing: members.billing(),
     auto_review: setting('auto_review') === '1',
     toolbox: toolbox.status().state,
     draft_reviews: setting('draft_reviews') === '1',
@@ -142,7 +159,7 @@ function publicSettings() {
     plan: activity.plan(),
     rules: approvals.rules(),
     lan: HOST === '0.0.0.0',
-    lan_urls: HOST === '0.0.0.0' ? lanUrls().map((u) => `${u}/?token=${setting('access_token')}`) : [],
+    lan_urls: HOST === '0.0.0.0' && who.owner ? lanUrls().map((u) => `${u}/?token=${setting('access_token')}`) : [],
     workspace: PATHS.computers,
     shared: PATHS.shared,
   };
@@ -157,7 +174,7 @@ const route = (method, pattern, handler) => {
 };
 
 // State & events
-route('GET', '/api/state', () => stateSnapshot());
+route('GET', '/api/state', (req) => ({ ...stateSnapshot(), settings: publicSettings(req.who), me: req.who, members: members.list() }));
 route('GET', '/api/events', (req, res) => { subscribe(res); return undefined; });
 route('GET', '/api/search', (req, res, p, q) => chats.search(q.get('q') || ''));
 
@@ -215,7 +232,8 @@ route('POST', '/api/chats/:id/messages', async (req, res, p) => {
     engine.stopChat(p.id);
     return m;
   }
-  const msg = chats.addMessage({ chatId: p.id, author: 'user', text, parentId: body.parentId || null, attachments: body.attachments || [], meta: body.voice ? { voice: true } : {} });
+  const by = req.who.owner ? {} : { by: { id: req.who.id, name: req.who.name, role: req.who.role } };
+  const msg = chats.addMessage({ chatId: p.id, author: 'user', text, parentId: body.parentId || null, attachments: body.attachments || [], meta: { ...(body.voice ? { voice: true } : {}), ...by } });
   const chatRow = chats.getChat(p.id);
   if (chatRow?.kind === 'dm') missions.onUserMessage(p.id, chatRow.bot_ids[0]);
   engine.onUserMessage(p.id, msg).catch((e) => console.error('run', e));
@@ -240,7 +258,7 @@ route('PUT', '/api/office/handbook', async (req) => { const b = await readJson(r
 route('POST', '/api/office/reviews', () => ({ bosses: office.runReviews() }));
 route('POST', '/api/company/tasks', async (req) => { const b = await readJson(req); return company.assign({ title: b.title, detail: b.detail, ownerId: b.ownerId, due: b.due, assignedBy: 'user' }); });
 route('PATCH', '/api/company/tasks/:id', async (req, res, p) => { const b = await readJson(req); return b.verdict ? company.review(p.id, { verdict: b.verdict, notes: b.notes, by: 'user' }) : company.update(p.id, { status: b.status, note: b.note, by: 'user' }); });
-route('POST', '/api/command', async (req) => command.ask((await readJson(req)).text));
+route('POST', '/api/command', async (req) => command.ask((await readJson(req)).text, req.who));
 route('GET', '/api/command/feed', () => command.feed());
 route('GET', '/api/gmail', () => ({ connected: gmail.connected(), email: gmail.email() }));
 route('POST', '/api/gmail', async (req) => gmail.connect(await readJson(req)));
@@ -253,7 +271,12 @@ route('POST', '/api/chats/:id/warm', (req, res, p) => ({ ok: engine.warm(p.id) }
 route('POST', '/api/chats/:id/stop', (req, res, p) => { engine.stopChat(p.id); return { ok: true }; });
 route('POST', '/api/chats/:id/reset', (req, res, p) => { engine.stopChat(p.id); chats.resetChat(p.id); return { ok: true }; });
 route('POST', '/api/messages/:id/react', async (req, res, p) => chats.react(p.id, (await readJson(req)).emoji));
-route('POST', '/api/cards/:id', async (req, res, p) => ({ ok: await tools.resolveCard(p.id, await readJson(req)) }));
+route('POST', '/api/cards/:id', async (req, res, p) => {
+  const payload = await readJson(req);
+  const msg = chats.getMessage(p.id);
+  if (msg?.card && !members.canResolve(req.who, msg.card, payload)) throw new Error(msg.card.type === 'draft' ? `Only ${members.ownerFirst()} can send from their accounts. You can skip it.` : `Only ${members.ownerFirst()} can answer this one.`);
+  return { ok: await tools.resolveCard(p.id, payload) };
+});
 
 // Uploads (attachments)
 route('POST', '/api/uploads', async (req) => {
@@ -307,7 +330,7 @@ route('POST', '/api/missions/:id/now', (req, res, p) => { const m = missions.get
 route('DELETE', '/api/missions/:id', (req, res, p) => { missions.remove(p.id); return { ok: true }; });
 
 // Settings
-route('GET', '/api/settings', () => publicSettings());
+route('GET', '/api/settings', (req) => publicSettings(req.who));
 route('PATCH', '/api/settings', async (req) => {
   const b = await readJson(req);
   if (b.auto_review != null) setSetting('auto_review', b.auto_review ? '1' : '0');
@@ -330,6 +353,14 @@ route('PATCH', '/api/settings', async (req) => {
   emit('settings');
   return publicSettings();
 });
+// Teammates (owner only) and who pays for Bot work
+const linksFor = (token) => (HOST === '0.0.0.0' ? lanUrls().map((u) => `${u}/?token=${token}`) : []);
+route('GET', '/api/members', () => ({ members: members.list(), lan: HOST === '0.0.0.0' }));
+route('POST', '/api/members', async (req) => { const r = members.add(await readJson(req)); return { member: r.member, links: linksFor(r.token), lan: HOST === '0.0.0.0' }; });
+route('POST', '/api/members/:id/link', (req, res, p) => { const r = members.relink(p.id); return { member: r.member, links: linksFor(r.token), lan: HOST === '0.0.0.0' }; });
+route('DELETE', '/api/members/:id', (req, res, p) => { members.revoke(p.id); return { ok: true }; });
+route('GET', '/api/billing', () => members.billing());
+route('POST', '/api/billing', async (req) => members.setBilling(await readJson(req)));
 route('POST', '/api/rules', async (req) => { const b = await readJson(req); return { id: approvals.addRule(b.kind, b.text) }; });
 route('DELETE', '/api/rules/:id', (req, res, p) => { approvals.removeRule(p.id); return { ok: true }; });
 route('POST', '/api/memory/import', async (req) => {
@@ -456,7 +487,7 @@ const server = http.createServer(async (req, res) => {
 
   // First visit from a phone: ?token=… sets a cookie.
   const qtoken = url.searchParams.get('token');
-  if (qtoken && qtoken === setting('access_token')) {
+  if (qtoken && (qtoken === setting('access_token') || members.fromToken(qtoken))) {
     res.writeHead(302, { 'Set-Cookie': `tandem_token=${qtoken}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000`, Location: '/' });
     return res.end();
   }
@@ -464,7 +495,8 @@ const server = http.createServer(async (req, res) => {
   const isHook = p.startsWith('/hooks/');
   const isInternal = p.startsWith('/internal/');
   if (isInternal && !authed(req)) return json(res, 401, { error: 'Unauthorized' });
-  if (!isHook && !isInternal && !isLocal(req) && !authed(req)) {
+  req.who = isHook || isInternal ? null : whoIs(req);
+  if (!isHook && !isInternal && !req.who) {
     res.writeHead(401, { 'Content-Type': 'text/html' });
     return res.end('<p style="font:16px system-ui;padding:2rem">Open the link from Tandem → Settings → Devices on this phone.</p>');
   }
@@ -473,6 +505,7 @@ const server = http.createServer(async (req, res) => {
     const origin = req.headers.origin;
     if (origin && new URL(origin).host !== req.headers.host) return json(res, 403, { error: 'Cross-origin request blocked' });
   }
+  if (req.who && !req.who.owner && members.ownerOnly(req.method, p)) return json(res, 403, { error: `Only ${members.ownerFirst()} can change this.` });
 
   for (const r of routes) {
     if (r.method !== req.method) continue;
@@ -525,6 +558,7 @@ if (laptop.enabled() && !setting('accounts_imported')) {
     .finally(() => computer.closeMacBrowsers(all('SELECT id FROM bots').map((b) => b.id)));
 }
 if (laptop.enabled()) laptop.prepare(); // Bot laptops: start the VM, build the image once
+await members.loadApiKey().catch(() => {});
 routines.recover();
 setInterval(() => missions.tick(), 15 * 1000);
 // Keep the Mac from idle-sleeping while Bots work or a mission wakes soon (the lid still sleeps it).

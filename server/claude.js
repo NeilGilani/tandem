@@ -5,9 +5,15 @@ import { PATHS } from './db.js';
 export const CLAUDE_BIN = process.env.TANDEM_CLAUDE || 'claude';
 
 // Environment for every Claude Code child: no inherited session markers.
+// With a company API key set, every Bot bills to it instead of your Claude plan.
+let apiKey = null;
+export const setApiKey = (k) => { apiKey = k || null; };
+export const usingApiKey = () => !!apiKey;
+
 export function childEnv(extra = {}) {
   const env = { ...process.env, ...extra };
   for (const k of Object.keys(env)) if (k.startsWith('CLAUDECODE') || k === 'CLAUDE_CODE_ENTRYPOINT') delete env[k];
+  if (apiKey) { env.ANTHROPIC_API_KEY = apiKey; delete env.CLAUDE_CODE_OAUTH_TOKEN; }
   return env;
 }
 
