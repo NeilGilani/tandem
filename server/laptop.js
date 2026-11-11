@@ -11,7 +11,7 @@ import { ROOT, PATHS, setting, timezone } from './db.js';
 import { emit } from './bus.js';
 
 export const PROFILE = 'tandem';
-export const IMAGE = 'tandem-laptop:1';
+export const IMAGE = 'tandem-laptop:2';
 const SOCK = process.env.TANDEM_DOCKER_HOST || `unix://${os.homedir()}/.colima/${PROFILE}/docker.sock`;
 const BIN = (name) => ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin'].map((d) => path.join(d, name)).find((p) => fs.existsSync(p)) || name;
 export const SCREEN = { w: 1280, h: 800 };
@@ -101,7 +101,10 @@ function folders(workspace) {
 export async function ensure(botId, { workspace, ports }) {
   if (!(await prepare())) throw new Error(`Laptops aren't available: ${state.detail}`);
   const name = nameOf(botId);
-  const running = await text(['inspect', '-f', '{{.State.Running}}', name]).catch(() => null);
+  // A laptop on an older image is rebuilt on the current one (its files live in the Bot's folder).
+  const image = await text(['inspect', '-f', '{{.Config.Image}}', name]).catch(() => null);
+  if (image && image !== IMAGE) await docker(['rm', '-f', name]).catch(() => {});
+  const running = image && image === IMAGE ? await text(['inspect', '-f', '{{.State.Running}}', name]).catch(() => null) : null;
   if (running === 'true') return false;
   if (running === 'false') { await docker(['start', name]); return true; }
   fs.mkdirSync(workspace, { recursive: true });
@@ -114,7 +117,13 @@ export async function ensure(botId, { workspace, ports }) {
   return true;
 }
 
-export const stop = (botId) => docker(['stop', '-t', '3', nameOf(botId)]).catch(() => {});
+export const stop = (botId) => docker(['stop', '-t', '10', nameOf(botId)]).catch(() => {});
+export const restart = (botId) => docker(['restart', '-t', '10', nameOf(botId)]);
+// Laptops already running (say, from before Tandem restarted), so they can be put to sleep when idle.
+export async function runningBots() {
+  const out = await text(['ps', '--filter', 'label=tandem.bot', '--format', '{{.Label "tandem.bot"}}']).catch(() => '');
+  return out.split('\n').filter(Boolean);
+}
 export const remove = (botId) => docker(['rm', '-f', nameOf(botId)]).catch(() => {});
 export async function isRunning(botId) { return (await text(['inspect', '-f', '{{.State.Running}}', nameOf(botId)]).catch(() => '')) === 'true'; }
 

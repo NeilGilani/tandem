@@ -48,7 +48,9 @@ ${computer.onLaptop(bot.id) ? `You have your own laptop: a Linux (Debian) comput
   matplotlib, openpyxl, xlsxwriter, python-docx, python-pptx, pypdf, reportlab, requests, beautifulsoup4 and Pillow,
   plus LibreOffice (\`soffice --headless --convert-to pdf file.docx\`), git, curl, jq and ImageMagick. Mac-only commands
   (open, osascript, mdfind, pbcopy) don't exist there; use the Mac tools for Mac apps.
-- Files: your home folder is ${computer.workspaceOf(bot.id)}. Durable work goes there. These Mac folders are on your laptop at
+- Files: your home folder is ${computer.workspaceOf(bot.id)}. Durable work goes there. Your file tools (Read, Write,
+  Edit) work on the Mac and your shell runs on your laptop; they share only your home folder and the folders below,
+  so keep working files there. Never use /tmp: the laptop's /tmp and the Mac's /tmp are different places. These Mac folders are on your laptop at
   the same paths: ${laptopFolders(bot.id).join(', ')}. The shared folder is for handing files to other Bots.
 - Browser: the \`mcp__playwright__browser_*\` tools drive Chromium on your laptop. Its sign-ins persist. Prefer
   browser_snapshot to read pages. Keep at least one tab open.

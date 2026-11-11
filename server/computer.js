@@ -86,9 +86,11 @@ export async function ensureBrowser(botId) {
   if (onLaptop(botId)) {
     m.activity = 'Opening its laptop';
     emit('computer', status(botId));
-    await laptop.ensure(botId, { workspace: m.workspace, ports: { cdp: m.browserPort, screen: m.screenPort } });
+    const fresh = await laptop.ensure(botId, { workspace: m.workspace, ports: { cdp: m.browserPort, screen: m.screenPort } });
     for (let i = 0; i < 120; i++) {
       if (await cdpUp(m.browserPort)) { m.pid = 'laptop'; m.activity = ''; await started(botId); emit('computer', status(botId)); return true; }
+      // Running but its browser won't answer: restart the whole laptop once.
+      if (i === 40 && !fresh) { m.activity = 'Restarting its laptop'; emit('computer', status(botId)); await laptop.restart(botId).catch(() => {}); }
       await new Promise((r) => setTimeout(r, 250));
     }
     throw new Error('The laptop started but its browser did not come up.');
@@ -518,6 +520,8 @@ export function teaching() {
 // ---- Housekeeping ----------------------------------------------------------------
 // Close browsers nobody has used for a while (sign-ins stay in the profile).
 export function startIdleReaper(isBusy) {
+  // Adopt laptops that were already running so they sleep when idle too.
+  if (laptop.enabled()) laptop.runningBots().then((ids) => { for (const id of ids) { const m = machine(id); m.pid = m.pid || 'laptop'; m.lastUsed = Date.now(); } }).catch(() => {});
   setInterval(async () => {
     for (const m of machines.values()) {
       if (!m.pid || m.control === 'user' || m.teach || isBusy(m.botId)) continue;

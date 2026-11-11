@@ -108,9 +108,22 @@ function groupTranscript(chat, botId) {
  * Run one turn of a Bot in a chat.
  * opts: { origin: 'chat'|'routine'|'handoff'|'system', attachments, replyTo, depth, preapproved, parentId }
  */
+// When the Claude plan limit is hit, background work waits for the reset instead of
+// starting, failing and retrying (your own messages still go through and say so).
+let limitedUntil = 0;
+const held = [];
+function holdUntilReset(botId, chatId, text, opts) {
+  return new Promise((resolve) => {
+    held.push(() => runBot(botId, chatId, text, opts).then(resolve));
+    if (held.length === 1) setTimeout(() => { limitedUntil = 0; const list = held.splice(0); list.forEach((go, i) => setTimeout(go, i * 4000)); }, Math.max(limitedUntil - now(), 5000) + 60e3);
+  });
+}
+export const planLimitedUntil = () => (limitedUntil > now() ? limitedUntil : 0);
+
 export function runBot(botId, chatId, text, opts = {}) {
   const key = `${opts.sessionKey || chatId}:${botId}`;
   const origin = opts.origin || 'chat';
+  if (origin !== 'chat' && limitedUntil > now()) return holdUntilReset(botId, chatId, text, opts);
   const current = active.get(key);
   if (current) {
     if (origin === 'chat') {
@@ -426,6 +439,7 @@ function start(botId, chatId, text, opts) {
       if (limited) {
         const until = (runCtx.rate?.resetsAt ? runCtx.rate.resetsAt * 1000 : activity.plan()?.resetsAt) || now() + 30 * 60e3;
         const wait = Math.min(Math.max(until - now() + 60e3, 60e3), 6 * 3600e3);
+        limitedUntil = Math.max(limitedUntil, now() + wait - 60e3);
         chats.addMessage({ chatId, author: 'system', botId, text: `${bot.name} paused: your Claude plan limit is reached. It picks this back up at ${new Date(now() + wait).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`, meta: { kind: 'paused' } });
         setTimeout(() => resume(botId, chatId, opts, 'Your plan limit has reset.'), wait);
       } else if (transient && tries < 2) {

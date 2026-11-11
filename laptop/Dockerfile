@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       lxterminal pcmanfm mousepad libreoffice-calc libreoffice-writer libreoffice-impress libreoffice-gtk3 \
       python3 python3-pandas python3-matplotlib python3-openpyxl python3-docx python3-pip python3-pypdf \
       python3-bs4 python3-lxml python3-requests python3-reportlab python3-pil python3-tabulate python3-xlsxwriter \
+      python3-venv python3-opencv ffmpeg \
       xdotool imagemagick socat curl wget git jq unzip zip ca-certificates procps tzdata dbus-x11 \
     && pip3 install --no-cache-dir --break-system-packages python-pptx \
     && apt-get clean && rm -rf /var/lib/apt/lists/* /usr/share/doc/* /usr/share/man/*
