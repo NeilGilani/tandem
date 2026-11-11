@@ -22,6 +22,10 @@ import * as activity from './activity.js';
 export let PORT = 4747;
 export const setPort = (p) => { PORT = p; };
 
+// Called when a run ends: ({ botId, chatId, opts, text, error }).
+const endHooks = [];
+export const onRunEnd = (fn) => endHooks.push(fn);
+
 const STALL_MS = Number(process.env.TANDEM_STALL_MS) || 20 * 60e3; // longer than the 10-minute command timeout
 const active = new Map(); // `${chatId}:${botId}` -> run
 const queues = new Map(); // same key -> promise chain for background work
@@ -478,6 +482,7 @@ function start(botId, chatId, text, opts) {
     if (opts.replyTo && runCtx.text && !error) deliverReply(botId, opts.replyTo, runCtx.text, opts.depth || 0);
     computer.touch(botId);
     activity.finish(runCtx.runAct, runCtx.stopped ? 'stopped' : error ? 'error' : 'ok', runCtx.text ? runCtx.text.slice(0, 1500) : null);
+    for (const fn of endHooks) { try { fn({ botId, chatId, opts, text: runCtx.text, error, stopped: runCtx.stopped }); } catch {} }
     resolveDone({ error, text: runCtx.text, messageId: runCtx.messageId, shot: runCtx.browser ? runCtx.lastShot || null : null });
   });
   }

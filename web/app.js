@@ -7,6 +7,7 @@ import { renderApps, renderSkills, renderSettings, renderTemplates, renderActivi
 import { needsOnboarding, renderOnboarding } from './onboarding.js';
 import { startCall } from './voice.js';
 import { renderHome as renderHomePage, refreshHome } from './home.js';
+import { renderCommand } from './command.js';
 import { cheer } from './alive.js';
 import { openQuickAsk } from './quickask.js';
 import { renderMissions, newMission, missionCard, openMission, progress as missionProgress } from './missions.js';
@@ -1048,7 +1049,7 @@ const homeDeps = () => ({ renderCard, planBars, missionCard, newMission });
 function renderHome() {
   currentChatId = null;
   if (needsOnboarding()) return renderOnboarding($main);
-  if (S.bots.length) return renderHomePage($main, homeDeps());
+  if (S.bots.length) return S.route.id === 'board' ? renderHomePage($main, homeDeps()) : renderCommand($main);
   if (!S.bots.length) {
     $main.replaceChildren(h('div.empty', h('div',
       avatar({ shape: 'circle', color: '#6d5dfc' }, 76, { blink: true }),
@@ -1177,7 +1178,7 @@ on('run', (r) => {
 });
 let homeTimer;
 let homeRefetch = false;
-function homeSoon(refetch = false) { homeRefetch ||= refetch; clearTimeout(homeTimer); homeTimer = setTimeout(() => { refreshHome(homeDeps(), { refetch: homeRefetch }); homeRefetch = false; }, 250); }
+function homeSoon(refetch = false) { homeRefetch ||= refetch; clearTimeout(homeTimer); homeTimer = setTimeout(() => { if (S.route.id === 'board') refreshHome(homeDeps(), { refetch: homeRefetch }); homeRefetch = false; }, 250); }
 on('message', () => { homeSoon(); nativeStatus(); });
 
 // ---------- Mac app bridge ---------------------------------------------------------------------

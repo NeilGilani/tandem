@@ -23,6 +23,7 @@ import * as squads from './squads.js';
 import * as laptop from './laptop.js';
 import * as accounts from './accounts.js';
 import * as gmail from './gmail.js';
+import * as command from './command.js';
 import * as company from './company.js';
 import * as office from './office.js';
 import * as missions from './missions.js';
@@ -38,6 +39,8 @@ missions.attach(engine);
 squads.attach(engine);
 company.attach(engine);
 office.attach(engine);
+command.attach(engine);
+engine.onRunEnd(({ opts, text, error, stopped }) => { if (opts.taskId && !error && !stopped && text) command.closeIfOpen(opts.taskId, text); });
 
 const WEB = path.join(ROOT, 'web');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json',
@@ -237,6 +240,8 @@ route('PUT', '/api/office/handbook', async (req) => { const b = await readJson(r
 route('POST', '/api/office/reviews', () => ({ bosses: office.runReviews() }));
 route('POST', '/api/company/tasks', async (req) => { const b = await readJson(req); return company.assign({ title: b.title, detail: b.detail, ownerId: b.ownerId, due: b.due, assignedBy: 'user' }); });
 route('PATCH', '/api/company/tasks/:id', async (req, res, p) => { const b = await readJson(req); return b.verdict ? company.review(p.id, { verdict: b.verdict, notes: b.notes, by: 'user' }) : company.update(p.id, { status: b.status, note: b.note, by: 'user' }); });
+route('POST', '/api/command', async (req) => command.ask((await readJson(req)).text));
+route('GET', '/api/command/feed', () => command.feed());
 route('GET', '/api/gmail', () => ({ connected: gmail.connected(), email: gmail.email() }));
 route('POST', '/api/gmail', async (req) => gmail.connect(await readJson(req)));
 route('DELETE', '/api/gmail', async () => { await gmail.disconnect(); return { ok: true }; });
