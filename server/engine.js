@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { ROOT, PATHS, uid, now, run as sql, get as sqlGet, setting } from './db.js';
-import { CLAUDE_BIN, childEnv, quickJson, quick } from './claude.js';
+import { CLAUDE_BIN, PROMPT_ON_STDIN, spawnClaude, childEnv, quickJson, quick } from './claude.js';
 import { emit } from './bus.js';
 import { pickModel } from './router.js';
 import * as chats from './chats.js';
@@ -150,6 +150,18 @@ function waitFor(key) {
   return r ? r.done : Promise.resolve();
 }
 
+// Where a long prompt can't ride on the command line (Windows), the Bot's instructions go
+// in a file next to the run's MCP config and are removed with it.
+const promptFile = (mcpFile) => mcpFile.replace(/\.json$/, '.prompt.md');
+function dropRunFiles(mcpFile) {
+  for (const f of [mcpFile, promptFile(mcpFile)]) { try { fs.unlinkSync(f); } catch {} }
+}
+function systemPromptArgs(mcpFile, text) {
+  if (!PROMPT_ON_STDIN) return ['--append-system-prompt', text];
+  fs.writeFileSync(promptFile(mcpFile), text);
+  return ['--append-system-prompt-file', promptFile(mcpFile)];
+}
+
 // The Claude Code flags for a turn (everything but the prompt itself).
 function runArgs(bot, chat, runCtx, sessKey) {
   const sid = chats.sessionFor(sessKey, bot.id);
@@ -158,7 +170,7 @@ function runArgs(bot, chat, runCtx, sessKey) {
   const args = [
     '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
     '--model', runCtx.model,
-    '--append-system-prompt', prompt.build(bot, chat, { origin: runCtx.origin }),
+    ...systemPromptArgs(mcpFile, prompt.build(bot, chat, { origin: runCtx.origin })),
     '--mcp-config', mcpFile, '--strict-mcp-config',
     '--setting-sources', '',
     '--permission-mode', 'acceptEdits',
@@ -197,11 +209,11 @@ export function warm(chatId) {
   const entry = { id, model, sid, newSid, mcpFile, pre: [], child: null, timer: null };
   warmPool.set(key, entry);
   computer.ensureBrowser(botId).catch(() => {});
-  const child = spawn(CLAUDE_BIN, ['-p', '--input-format', 'stream-json', ...args], { cwd: computer.workspaceOf(botId), env: CHILD_ENV(botId), stdio: ['pipe', 'pipe', 'pipe'] });
+  const child = spawn(CLAUDE_BIN, ['-p', '--input-format', 'stream-json', ...args], { cwd: computer.workspaceOf(botId), env: CHILD_ENV(botId), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
   entry.child = child;
   entry.onData = (d) => entry.pre.push(d);
   child.stdout.on('data', entry.onData);
-  child.on('close', () => { if (warmPool.get(key) === entry) { warmPool.delete(key); try { fs.unlinkSync(mcpFile); } catch {} } });
+  child.on('close', () => { if (warmPool.get(key) === entry) { warmPool.delete(key); dropRunFiles(mcpFile); } });
   entry.timer = setTimeout(() => dropWarm(key), WARM_TTL);
   return true;
 }
@@ -212,7 +224,7 @@ function dropWarm(key) {
   warmPool.delete(key);
   clearTimeout(e.timer);
   try { e.child.kill('SIGTERM'); } catch {}
-  try { fs.unlinkSync(e.mcpFile); } catch {}
+  dropRunFiles(e.mcpFile);
 }
 
 // A warm session can take this turn only if it was started exactly as this turn would be.
@@ -223,7 +235,7 @@ function takeWarm(key, { chatId, botId, model, opts }) {
     && e.model === model && chats.sessionFor(chatId, botId) === e.sid && e.child.exitCode === null;
   warmPool.delete(key);
   clearTimeout(e.timer);
-  if (!fits) { try { e.child.kill('SIGTERM'); } catch {} try { fs.unlinkSync(e.mcpFile); } catch {} return null; }
+  if (!fits) { try { e.child.kill('SIGTERM'); } catch {} dropRunFiles(e.mcpFile); return null; }
   return e;
 }
 
@@ -249,7 +261,7 @@ function start(botId, chatId, text, opts) {
   const sessKey = opts.sessionKey || chatId;
   let mcpFile, args = null, newSid;
   if (warmed) ({ mcpFile, newSid } = warmed);
-  else { const r = runArgs(bot, chat, runCtx, sessKey); mcpFile = r.mcpFile; newSid = r.newSid; args = ['-p', fullText, ...r.args]; }
+  else { const r = runArgs(bot, chat, runCtx, sessKey); mcpFile = r.mcpFile; newSid = r.newSid; args = r.args; }
   if (newSid) chats.setSession(sessKey, botId, newSid);
 
   let resolveDone;
@@ -273,7 +285,7 @@ function start(botId, chatId, text, opts) {
   return runCtx.done;
 
   function launch() {
-  const child = warmed ? warmed.child : spawn(CLAUDE_BIN, args, { cwd: computer.workspaceOf(botId), env: CHILD_ENV(botId), stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = warmed ? warmed.child : spawnClaude(fullText, args, { cwd: computer.workspaceOf(botId), env: CHILD_ENV(botId), stdio: ['ignore', 'pipe', 'pipe'] });
   runCtx.child = child;
 
   let buf = '', stderr = '', resultEvt = null;
@@ -421,7 +433,7 @@ function start(botId, chatId, text, opts) {
   child.on('close', async (code) => {
     clearInterval(watchdog);
     if (active.get(key) === runCtx) active.delete(key);
-    try { fs.unlinkSync(mcpFile); } catch {}
+    dropRunFiles(mcpFile);
     approvals.cancelFor(id);
     let error = null;
     if (resultEvt) {

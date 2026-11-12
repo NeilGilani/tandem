@@ -1,5 +1,5 @@
 // Tandem web app: sidebar, conversations, cards, composer, palette, shortcuts.
-import { api, h, md, avatar, groupAvatar, userAvatar, icon, toast, modal, confirm, menu, time, fileUrl, SHAPES, COLORS, logo, esc, loadLogos } from './lib.js';
+import { api, h, md, avatar, groupAvatar, userAvatar, icon, toast, modal, confirm, menu, time, fileUrl, SHAPES, COLORS, logo, esc, loadLogos, host } from './lib.js';
 import { S, on, refresh, bot, chat, dmOf, runsIn, squadRuns, squad, warmChat, isReady, go, parseRoute, toggleComputer, connectEvents, comp } from './store.js';
 import { renderComputer } from './computer.js';
 import { openBotDrawer } from './drawer.js';
@@ -656,7 +656,7 @@ export function gmailConnectCard(submit) {
         h('li', 'Name it "Tandem" and press Create.'),
         h('li', 'Paste the 16 letters below.')),
       h('div.draft-field', h('label', 'Gmail'), addr), h('div.draft-field', h('label', 'App password'), pass), err,
-      h('div.hint', 'It stays in your Mac\'s Keychain. Bots never see it. Revoke it any time from the same Google page.')),
+      h('div.hint', `It stays in ${host.secrets}. Bots never see it. Revoke it any time from the same Google page.`)),
     h('div.card-actions', h('button.btn.primary', { on: { click: go } }, 'Connect Gmail')));
 }
 
@@ -840,7 +840,7 @@ function renderCard(m) {
     return h('div.card',
       h('div.card-h', c.title, statusPill('pending')),
       h('div.card-b', h('div.card-title', c.purpose), c.site && h('div.hint', c.site),
-        c.kind !== 'secret' && user, secret, h('div.hint', 'Stored in your Mac Keychain. The Bot never sees it.')),
+        c.kind !== 'secret' && user, secret, h('div.hint', `Stored in ${host.secrets}. The Bot never sees it.`)),
       h('div.card-actions',
         h('button.btn.primary', { on: { click: () => secret.value && cardAction(m, { username: user.value, secret: secret.value }) } }, 'Save'),
         h('button.btn.ghost', { on: { click: () => cardAction(m, { dismiss: true }) } }, 'Not now')));

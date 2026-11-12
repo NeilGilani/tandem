@@ -3,7 +3,7 @@
 // puts it on every other Bot's computer: right away if it's awake, or as soon as it wakes.
 // Bots never see the sign-in itself. Apps that share a sign-in (Gmail, Calendar, Drive)
 // are one account.
-import { execFile } from 'node:child_process';
+import * as secrets from './secrets.js';
 import crypto from 'node:crypto';
 import { all, get, run, now, db, PATHS } from './db.js';
 import { CATALOG, byId } from './catalog.js';
@@ -19,7 +19,6 @@ const SERVICE = 'Tandem accounts';
 // Each Tandem data folder has its own entries, so a test copy never touches your real sign-ins.
 const NS = crypto.createHash('sha1').update(PATHS.data).digest('hex').slice(0, 8);
 const item = (key) => `${NS}:${key}`;
-const sh = (args) => new Promise((resolve, reject) => execFile('security', args, { maxBuffer: 8 << 20 }, (err, out) => (err ? reject(err) : resolve(out.trim()))));
 const keyOf = (app) => [...(app.domains || [])].sort().join(',');
 const appsFor = (key) => CATALOG.filter((a) => a.kind === 'browser' && keyOf(a) === key);
 const matches = (cookie, domains) => { const d = cookie.domain.replace(/^\./, ''); return domains.some((x) => d === x || d.endsWith(`.${x}`)); };
@@ -42,7 +41,7 @@ export async function capture(botId, appId, { from = null } = {}) {
   const key = keyOf(app);
   const keep = jar.map(({ name, value, domain, path, expires, httpOnly, secure, sameSite, priority, partitionKey }) =>
     ({ name, value, domain, path, ...(expires > 0 ? { expires } : {}), httpOnly, secure, ...(sameSite ? { sameSite } : {}), ...(priority ? { priority } : {}), ...(partitionKey ? { partitionKey } : {}) }));
-  await sh(['add-generic-password', '-U', '-s', SERVICE, '-a', item(key), '-l', `Tandem sign-in: ${app.category || app.name}`, '-w', JSON.stringify(keep)]);
+  await secrets.set(SERVICE, item(key), JSON.stringify(keep), `Tandem sign-in: ${app.category || app.name}`);
   const apps = appsFor(key).map((a) => a.id);
   const label = apps.length > 1 ? (app.category || app.name) : app.name;
   run(`INSERT INTO accounts (key, label, apps, source_bot, cookies, updated) VALUES (?,?,?,?,?,?)
@@ -54,7 +53,7 @@ export async function capture(botId, appId, { from = null } = {}) {
 
 // Put a saved sign-in on a Bot's computer (its browser must be running).
 async function apply(botId, key) {
-  const raw = await sh(['find-generic-password', '-s', SERVICE, '-a', item(key), '-w']).catch(() => null);
+  const raw = await secrets.get(SERVICE, item(key)).catch(() => null);
   if (!raw) return false;
   await computer.setCookies(botId, JSON.parse(raw));
   return true;
@@ -116,7 +115,7 @@ export function setShared(key, shared) {
 }
 
 export async function forget(key) {
-  await sh(['delete-generic-password', '-s', SERVICE, '-a', item(key)]).catch(() => {});
+  await secrets.remove(SERVICE, item(key)).catch(() => {});
   run('DELETE FROM accounts WHERE key = ?', key);
   emit('connectors');
 }

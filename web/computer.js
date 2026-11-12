@@ -1,7 +1,7 @@
 // Computer panel: a live view of one Bot's own computer, with Take control,
 // Take over, I'm done and Teach. Shows the Bot of the current conversation;
 // the menu at the top switches to any other Bot's computer.
-import { api, h, icon, toast, avatar, menu } from './lib.js';
+import { api, h, icon, toast, avatar, menu, host } from './lib.js';
 import { S, bot, comp, focusBot, toggleComputer } from './store.js';
 
 const $el = document.getElementById('computer');
@@ -92,14 +92,14 @@ export function renderComputer() {
   $el.replaceChildren(...[
     h('div.cp-head', switcher, h('span', { style: { flex: 1 } }),
       c.laptop ? (live && h('a.icon-btn', { title: 'Open the screen in its own window', href: `http://127.0.0.1:${c.screen}/vnc.html?autoconnect=1&resize=scale&reconnect=1&view_only=${control ? 0 : 1}`, target: '_blank' }, icon('open')))
-        : h('button.icon-btn', { title: 'Show the window on this Mac', on: { click: () => api('POST', '/api/computer/focus', body) } }, icon('open')),
+        : h('button.icon-btn', { title: `Show the window on this ${host.machine}`, on: { click: () => api('POST', '/api/computer/focus', body) } }, icon('open')),
       h('button.icon-btn', { title: 'Close', on: { click: () => toggleComputer(false) } }, icon('x'))),
     screen,
     h('div.cp-url', meta.url || ' '),
     h('div.cp-activity', control ? `You're in control. ${b.name} waits until you press I'm done.` : (working ? (working.status || 'Working') : (c.activity || 'Idle'))),
     control && !c.teach && h('div.cp-banner',
       h('div', c.takeover?.reason || 'You took control.'),
-      h('div.hint', live ? 'You have the mouse and keyboard on the screen above. Do just that step, then press I\'m done.' : 'Do just that step. Click and scroll on the screen above and type below, or use the window on your Mac.'),
+      h('div.hint', live ? 'You have the mouse and keyboard on the screen above. Do just that step, then press I\'m done.' : 'Do just that step. Click and scroll on the screen above and type below, or use the window on your ' + host.machine + '.'),
       h('div.hstack', h('button.btn.primary', { on: { click: () => api('POST', '/api/computer/done', body) } }, "I'm done"))),
     control && !live && h('div.cp-type', h('button.icon-btn', { title: 'Back', on: { click: () => send({ type: 'back' }) } }, icon('back')), urlBox),
     control && !live && h('div.cp-type', typeBox),

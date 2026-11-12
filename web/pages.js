@@ -1,5 +1,5 @@
 // Full-page views: Connect apps, Skills, Settings, Bot templates.
-import { api, h, avatar, icon, toast, modal, confirm, sw, logo, time, md, menu } from './lib.js';
+import { api, h, avatar, icon, toast, modal, confirm, sw, logo, time, md, menu, host } from './lib.js';
 import { S, bot, dmOf, refresh, go, toggleComputer } from './store.js';
 import { gmailConnectCard } from './app.js';
 
@@ -59,7 +59,7 @@ export async function renderApps($main) {
       } } }, 'Stop sharing'));
   };
   const teamBlock = h('div.team-block',
-    h('div.team-h', h('b', 'Your team\'s accounts'), h('span.hint', 'Sign in once and every Bot can use it. Sign-ins live in your Mac\'s Keychain; Bots never see your password.')),
+    h('div.team-h', h('b', 'Your team\'s accounts'), h('span.hint', `Sign in once and every Bot can use it. Sign-ins live in ${host.secrets}; Bots never see your password.`)),
     accts.length ? h('div.team-list', accts.map(teamCard))
       : h('p.hint', { style: { margin: '6px 0 0' } }, 'No shared sign-ins yet. Add an app below and sign in once.'));
 
@@ -86,7 +86,7 @@ export async function renderApps($main) {
   } else {
     content = customAppForm(() => { appTab = 'installed'; renderApps($main); });
   }
-  page($main, 'Connect apps', 'Sign in to an app once and your whole team can use it. Mac apps and custom MCP apps work for every Bot.',
+  page($main, 'Connect apps', 'Sign in to an app once and your whole team can use it. ' + (host.machine === 'Mac' ? 'Mac apps and custom' : 'Custom') + ' MCP apps work for every Bot.',
     h('div.hstack', { style: { marginBottom: '14px', flexWrap: 'wrap' } },
       botPicker,
       h('button.btn', { on: { click: () => api('POST', `/api/connectors/refresh?bot=${encodeURIComponent(appBot || '')}`).then(() => { toast('Checked sign-ins'); renderApps($main); }) } }, icon('refresh'), 'Check sign-ins'),
@@ -246,11 +246,12 @@ export async function renderSettings($main, r) {
   } else if (t === 'computer') {
     const exec = h('select.select', [['smart', 'Ask only for risky commands'], ['ask', 'Ask for anything that changes files'], ['always', 'Always allow'], ['never', 'Never allow']].map(([v, l]) => h('option', { value: v, selected: st.local_execution === v }, l)));
     exec.addEventListener('change', () => patch({ local_execution: exec.value }));
+    const onMac = !st.platform || st.platform === 'darwin'; // Linux laptops (Colima) are Mac-only for now
     content = [
       h('h2', 'Your computer'),
-      h('div.field', h('label', 'Execution on this computer'), exec, h('div.hint', 'Whether Bots may run commands on this Mac. With risky commands only, everyday work like reading and writing files or running scripts goes ahead, and anything that deletes files, sends data out, installs software, reads saved passwords or touches system files stops for your OK.')),
-      h('h2', 'Bot laptops'),
-      (() => {
+      h('div.field', h('label', 'Execution on this computer'), exec, h('div.hint', 'Whether Bots may run commands on this ' + host.machine + '. With risky commands only, everyday work like reading and writing files or running scripts goes ahead, and anything that deletes files, sends data out, installs software, reads saved passwords or touches system files stops for your OK.')),
+      onMac && h('h2', 'Bot laptops'),
+      onMac && (() => {
         const L = st.laptops || {};
         const mode = h('select.select', { style: { width: 'auto' } }, [['laptop', 'Each Bot gets its own Linux laptop'], ['mac', 'Bots use a browser on this Mac']].map(([v, l]) => h('option', { value: v, selected: st.computer_mode === v }, l)));
         mode.addEventListener('change', () => patch({ computer_mode: mode.value }).then(() => toast('Saved. Restart Tandem to switch.')));
@@ -273,9 +274,9 @@ export async function renderSettings($main, r) {
         ];
       })(),
       h('h2', 'Bot computers'),
-      h('p.hint', 'Each Bot has its own computer: its own browser with its own sign-ins, and its own files folder. A browser starts when its Bot starts work and goes to sleep after 15 minutes idle. Sign-ins are kept. Commands still run on this Mac.'),
+      h('p.hint', 'Each Bot has its own computer: its own browser with its own sign-ins, and its own files folder. A browser starts when its Bot starts work and goes to sleep after 15 minutes idle. Sign-ins are kept. Commands still run on this ' + host.machine + '.'),
       h('dl.kv', h('dt', 'Shared folder'), h('dd', h('code', st.shared || '')), h('dt', 'Bot folders'), h('dd', h('code', st.workspace || '')),
-        h('dt', 'Python toolbox'), h('dd', { ready: 'Ready: data, charts, Excel, Word, PowerPoint, PDF and scraping packages', building: 'Installing in the background', unavailable: 'Needs Python 3 on this Mac', idle: 'Installs on next start' }[st.toolbox] || '')),
+        h('dt', 'Python toolbox'), h('dd', { ready: 'Ready: data, charts, Excel, Word, PowerPoint, PDF and scraping packages', building: 'Installing in the background', unavailable: 'Needs Python 3 on this ' + host.machine, idle: 'Installs on next start' }[st.toolbox] || '')),
       S.bots.length ? h('div.list', S.bots.map((b) => {
         const c = S.computers[b.id] || {};
         const body = { botId: b.id };
@@ -292,7 +293,7 @@ export async function renderSettings($main, r) {
     const user = h('input.input', { placeholder: 'Username or email', autocomplete: 'off' });
     const secret = h('input.input', { type: 'password', placeholder: 'Password or secret', autocomplete: 'new-password' });
     content = [
-      h('p.hint', 'The first place Bots look for a saved login. Values are stored in your Mac Keychain and filled into sign-in pages without the Bot ever seeing them. Never paste passwords or codes into chat.'),
+      h('p.hint', 'The first place Bots look for a saved login. Values are stored in ' + host.secrets + ' and filled into sign-in pages without the Bot ever seeing them. Never paste passwords or codes into chat.'),
       items.length ? h('div.list', items.map((v) => h('div.list-row', icon('key'), h('div.grow', v.name, h('small', [v.site, v.username].filter(Boolean).join(' · '))),
         h('button.btn.ghost.danger', { on: { click: async () => { if (await confirm(`Delete ${v.name} from the Vault?`)) { await api('DELETE', `/api/vault/${v.id}`); renderSettings($main, r); } } } }, 'Delete')))) : h('p.hint', 'Nothing saved.'),
       h('h2', 'Add a login'),
@@ -305,11 +306,11 @@ export async function renderSettings($main, r) {
   } else if (t === 'devices') {
     content = [
       h('h2', 'Manage your devices'),
-      h('p.hint', 'Tandem runs on this Mac. Use it from your phone or another computer on the same network — it installs like an app (Share → Add to Home Screen on iPhone; Install app in Chrome).'),
+      h('p.hint', 'Tandem runs on this ' + host.machine + '. Use it from your phone or another computer on the same network — it installs like an app (Share → Add to Home Screen on iPhone; Install app in Chrome).'),
       st.lan ? h('div.field', h('label', 'Open this link on your phone (keep it private — it signs the device in)'),
         st.lan_urls.map((u) => h('div.copy-field', h('input.input', { value: u, readOnly: true }), h('button.btn', { on: { click: () => { navigator.clipboard.writeText(u); toast('Copied'); } } }, 'Copy'))))
         : h('div.card', { style: { maxWidth: 'none' } }, h('div.card-b', h('div', 'Phone access is off. Restart Tandem with network access:'), h('pre', 'tandem start --lan'),
-          h('div.hint', 'Away from home, put this Mac and your phone on the same Tailscale network and use its Tailscale address.'))),
+          h('div.hint', 'Away from home, put this ' + host.machine + ' and your phone on the same Tailscale network and use its Tailscale address.'))),
     ];
   } else if (t === 'team') {
     content = await teamSettings(st, () => renderSettings($main, r));
@@ -441,7 +442,7 @@ async function teamSettings(st, rerender) {
         h('button.btn.ghost', { on: { click: async () => { const r = await api('POST', `/api/members/${m.id}/link`); linkModal(m.name, r.links, r.lan); } } }, 'New link'),
         h('button.btn.ghost.danger', { on: { click: async () => { if (await confirm(`Remove ${m.name}? Their link stops working right away.`, { label: 'Remove' })) { await api('DELETE', `/api/members/${m.id}`); rerender(); } } } }, 'Remove')))),
     h('div.hstack', { style: { marginTop: '10px' } }, name, h('button.btn.primary', { on: { click: add } }, 'Add teammate')),
-    h('div.list', { style: { marginTop: '14px' } }, h('div.list-row', h('div.grow', 'Let teammates connect', h('small', lan ? 'On. Other computers can reach Tandem with a sign-in link. Away from your Wi-Fi, use Tailscale on both computers.' : 'Off. Only this Mac can open Tandem.')),
+    h('div.list', { style: { marginTop: '14px' } }, h('div.list-row', h('div.grow', 'Let teammates connect', h('small', lan ? 'On. Other computers can reach Tandem with a sign-in link. Away from your Wi-Fi, use Tailscale on both computers.' : 'Off. Only this ' + host.machine + ' can open Tandem.')),
       sw(lan, async (v) => {
         const r = await api('POST', '/api/network', { on: v }).catch((e) => toast(e.message, 'bad'));
         if (r?.restarting) { toast('Restarting Tandem…'); setTimeout(() => location.reload(), 6000); }
@@ -451,7 +452,7 @@ async function teamSettings(st, rerender) {
     h('p.hint', 'A Claude Pro or Max plan is for one person. When teammates use your Bots, run them on a company Anthropic API key instead. It bills per use, so set a monthly limit in console.anthropic.com.'),
     h('div.list',
       h('div.list-row', h('div.grow', 'Your Claude plan', h('small', 'Fine while only you use the Bots.')), api_on ? h('button.btn', { on: { click: () => api('POST', '/api/billing', { mode: 'plan' }).then(rerender).catch((e) => toast(e.message, 'bad')) } }, 'Switch back') : h('span.hint', 'In use')),
-      h('div.list-row', h('div.grow', 'Company API key', h('small', api_on ? `In use · ${st.billing.key_hint}` : st.billing?.key_hint ? `Saved · ${st.billing.key_hint}` : 'Stored in your Mac Keychain; Bots never see it.')),
+      h('div.list-row', h('div.grow', 'Company API key', h('small', api_on ? `In use · ${st.billing.key_hint}` : st.billing?.key_hint ? `Saved · ${st.billing.key_hint}` : 'Stored in ' + host.secrets + '; Bots never see it.')),
         api_on ? h('span.hint', 'In use') : st.billing?.key_hint ? h('button.btn', { on: { click: () => api('POST', '/api/billing', { mode: 'api' }).then(rerender).catch((e) => toast(e.message, 'bad')) } }, 'Use it') : null)),
     h('div.hstack', { style: { marginTop: '10px' } }, key, h('button.btn', { on: { click: async () => {
       try { await api('POST', '/api/billing', { mode: 'api', apiKey: key.value }); toast('Bots now run on the company key'); rerender(); } catch (e) { toast(e.message, 'bad'); }

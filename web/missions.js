@@ -1,5 +1,5 @@
 // Missions: long-running work a Bot owns until it's done.
-import { api, h, avatar, icon, toast, modal, md, confirm, esc } from './lib.js';
+import { api, h, avatar, icon, toast, modal, md, confirm, esc, host } from './lib.js';
 import { S, bot, dmOf, go, on } from './store.js';
 
 const when = (ts) => {
@@ -97,7 +97,7 @@ export function newMission(botId) {
   const hours = h('select.select', [['any', 'Any time, day or night'], ['weekdays 9-18', 'Weekdays, 9 to 6'], ['daily 8-22', 'Every day, 8 to 10']].map(([v, l]) => h('option', { value: v }, l)));
   const budget = h('input.input', { type: 'number', min: 1, max: 200, value: 12 });
   modal({ title: 'Start a mission', wide: true, body: [
-    h('p.hint', { style: { margin: 0 } }, 'A mission is work a Bot owns until it’s done: it plans, works in sessions, waits on people like a person would, and checks back on its own, for as long as it takes. Your Mac needs to be on for it to work.'),
+    h('p.hint', { style: { margin: 0 } }, 'A mission is work a Bot owns until it’s done: it plans, works in sessions, waits on people like a person would, and checks back on its own, for as long as it takes. Your ' + host.machine + ' needs to be on for it to work.'),
     h('div.field', h('label', 'Bot'), sel),
     h('div.field', h('label', 'Goal'), goal),
     h('div.field', h('label', 'Done when'), done, h('div.hint', 'Optional. The Bot writes checkable criteria if you leave it empty.')),

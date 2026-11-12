@@ -13,7 +13,17 @@ unzip it, and drag Tandem to Applications. It's for Apple silicon and macOS 13 o
 The app isn't notarized yet, so the first time you open it, right-click Tandem and choose **Open**.
 It lives in the menu bar and keeps your Bots working after you close the window.
 
-**Or with Terminal:**
+**Windows:** in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/NeilGilani/tandem/main/install.ps1 | iex
+```
+
+It downloads Tandem to `~\tandem`, runs it in the background, starts it when you sign in, and opens
+http://127.0.0.1:4747. For a tray app with its own window (and its own Node), build `Tandem.exe`; see
+[Build the Windows app](#build-the-windows-app).
+
+**Or on a Mac with Terminal:**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/NeilGilani/tandem/main/install.sh | bash
@@ -22,8 +32,9 @@ curl -fsSL https://raw.githubusercontent.com/NeilGilani/tandem/main/install.sh |
 The installer downloads Tandem to `~/tandem`, sets it to run in the background and start at
 login, and opens http://127.0.0.1:4747.
 
-Requirements: macOS, Node 22.13+, Google Chrome (or Chromium, Edge or Brave), and
-[Claude Code](https://claude.com/claude-code) installed and signed in (`claude` on your PATH).
+Requirements: macOS or Windows 10/11, Node 22.13+, Google Chrome (or Chromium, Edge or Brave), and
+[Claude Code](https://claude.com/claude-code) installed and signed in (`claude` on your PATH). On Windows,
+Claude Code also needs [Git for Windows](https://git-scm.com/download/win), and the launcher is `bin\tandem.cmd`.
 
 ```bash
 tandem open | status | logs | uninstall
@@ -42,7 +53,7 @@ If you like it, [star the repo](https://github.com/NeilGilani/tandem).
 | Bots use apps the way a person does | Playwright MCP drives the Bot's own Chrome over CDP. You sign in per Bot in Connect apps |
 | Take over / I'm done | Computer panel: watch live, Take control (click and type from any device), or Take over in the real window, then press I'm done |
 | Connect apps | 70+ apps: Google, Microsoft (Outlook, Teams, OneDrive, SharePoint, Office), Slack, Notion, Linear, Jira, Salesforce, HubSpot, LinkedIn, GitHub, Stripe and more, plus Mac Calendar, Contacts, Reminders and Messages, plus any MCP server as a custom app |
-| Vault and 1Password fill | Vault stores values in your macOS Keychain. `vault_fill_login` fills sign-in forms and the Bot never sees the values |
+| Vault and 1Password fill | Vault stores values in your macOS Keychain (on Windows, in a file encrypted for your Windows account with DPAPI). `vault_fill_login` fills sign-in forms and the Bot never sees the values |
 | Approvals and Auto Review | Claude Code's permission prompt tool runs every non-read-only action through built-in safety checks and your Custom Rules. Cards offer Allow once, Always allow and Deny. Background cards expire after 30 minutes |
 | Execution on this computer | Ask every time / Always allow / Never allow, for shell commands |
 | Drafts | Outgoing email, Slack and Teams messages appear as draft cards with Send and Discard. Drafts can be turned off per Bot |
@@ -57,7 +68,7 @@ If you like it, [star the repo](https://github.com/NeilGilani/tandem).
 
 ### Limits of running locally
 
-- **The computer is your Mac, not a cloud machine.** Bots run while the Mac is awake and Tandem is running. Use `bin/tandem install` so Tandem starts at login.
+- **The computer is your Mac or PC, not a cloud machine.** Bots run while it is awake and Tandem is running. Use `bin/tandem install` (`bin\tandem.cmd install` on Windows) so Tandem starts at login.
 - **Connectors use browser sign-ins.** Tandem doesn't have OAuth apps registered with Google, Microsoft or others, so apps are used through the shared browser, the same way Grok Bot uses apps that have no API connector. For an API-level connector, add that service's MCP server as a custom app.
 - **No hosted Bot email address.** Bots use your connected Gmail or Outlook instead.
 - **Webhooks only reach this Mac.** For GitHub, Linear, Sentry or PagerDuty to call a routine's webhook from the internet, expose port 4747 with a tunnel such as Tailscale Funnel or Cloudflare Tunnel.
@@ -75,6 +86,22 @@ can send from your accounts, connect apps, see saved logins or change settings. 
 for Bot work" to a company Anthropic API key first. Turn on "Let teammates connect" (or run `tandem install --lan`)
 plus Tailscale; never expose it to the public internet.
 
+### On Windows
+
+- Bots use a browser on your PC. The window is parked off-screen while a Bot works; Take over brings it back.
+- Mac apps (Calendar, Contacts, Reminders, Messages) and the Linux laptops aren't available. Notifications are.
+- Bots' shell commands run in Git Bash, the way Claude Code runs them on Windows.
+
+## Build the Windows app
+
+```powershell
+windows\build.ps1 -Open    # -> dist\Tandem\Tandem.exe and dist\Tandem-win.zip
+```
+
+It uses the C# compiler that ships with Windows, so there is nothing to install. The app lives in the
+tray, keeps the server running, and opens Tandem in its own Edge or Chrome window. `-NoNode` skips
+bundling Node. Build from a short path such as `C:\src\tandem`; Windows tools still trip on very long ones.
+
 ## Build the Mac app
 
 ```bash
@@ -88,5 +115,6 @@ server/   daemon: HTTP API, events, engine (Claude Code runs), approvals, routin
 mcp/      the per-run MCP bridge that gives Bots the Tandem tools
 web/      the app (no build step)
 macos/    the native Mac app (Swift): window, menu bar, notifications, bundled Node
+windows/  the Windows tray app (C#): keeps the server running, opens the app window, bundled Node
 data/     everything you create (gitignored): database, memory, skills, uploads, computer
 ```

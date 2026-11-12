@@ -10,19 +10,12 @@ import path from 'node:path';
 import { PATHS, uid, get, all, run } from './db.js';
 import { emit } from './bus.js';
 import * as laptop from './laptop.js';
+import { WIN, chromeCandidates, focusProcess, mirrorDir } from './platform.js';
 
 const BASE_PORT = Number(process.env.TANDEM_CDP_PORT || 9400);
 const IDLE_MS = 15 * 60 * 1000;
 
-const CHROME_CANDIDATES = [
-  process.env.TANDEM_CHROME,
-  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  '/Applications/Chromium.app/Contents/MacOS/Chromium',
-  '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
-  '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
-  '/usr/bin/google-chrome',
-  '/usr/bin/chromium',
-].filter(Boolean);
+const CHROME_CANDIDATES = chromeCandidates();
 
 const machines = new Map(); // botId -> machine
 
@@ -102,7 +95,7 @@ export async function ensureBrowser(botId) {
     `--remote-debugging-port=${m.port}`,
     `--user-data-dir=${m.profile}`,
     '--no-first-run', '--no-default-browser-check',
-    '--window-size=1280,860',
+    '--window-size=1280,860', ...(WIN ? ['--window-position=-32000,-32000'] : []),
     // The window lives minimized; without these Chrome slows its pages to a crawl.
     '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows',
     'about:blank',
@@ -258,10 +251,7 @@ export async function cloneProfile(fromBotId, toBotId) {
   if (!fs.existsSync(src) || await cdpUp(to.browserPort)) return false;
   fs.mkdirSync(dst, { recursive: true });
   const ex = ['Singleton*', 'DevToolsActivePort', 'Cache', 'Code Cache', 'GPUCache', 'ShaderCache', 'GrShaderCache', 'GraphiteDawnCache', 'DawnCache', 'Crashpad', 'CacheStorage', 'ScriptCache', 'component_crx_cache', 'optimization_guide_model_store'];
-  await new Promise((resolve) => {
-    const c = spawn('rsync', ['-a', '--delete', ...ex.flatMap((e) => ['--exclude', e]), `${src}/`, `${dst}/`], { stdio: 'ignore' });
-    c.on('close', resolve); c.on('error', resolve);
-  });
+  await mirrorDir(src, dst, ex);
   return true;
 }
 
@@ -270,7 +260,12 @@ async function setWindowState(botId, state) {
   const list = await pages(botId);
   if (!list[0]) return;
   const { windowId } = await cdpBrowser(botId, 'Browser.getWindowForTarget', { targetId: list[0].id });
-  if (state === 'normal') await cdpBrowser(botId, 'Browser.setWindowBounds', { windowId, bounds: { windowState: 'normal' } });
+  if (WIN) {
+    // Chrome on Windows stops drawing a minimized window (screenshots hang), so the
+    // window is parked off-screen instead and brought back when you want to see it.
+    await cdpBrowser(botId, 'Browser.setWindowBounds', { windowId, bounds: { windowState: 'normal' } }).catch(() => {});
+    await cdpBrowser(botId, 'Browser.setWindowBounds', { windowId, bounds: state === 'normal' ? { left: 80, top: 60, width: 1280, height: 860 } : { left: -32000, top: -32000 } });
+  } else if (state === 'normal') await cdpBrowser(botId, 'Browser.setWindowBounds', { windowId, bounds: { windowState: 'normal' } });
   else await cdpBrowser(botId, 'Browser.setWindowBounds', { windowId, bounds: { windowState: state } });
 }
 
@@ -337,15 +332,12 @@ export async function openUrl(botId, url) {
   }
 }
 
-// Show this Bot's browser window on the Mac (it normally stays minimized).
+// Show this Bot's browser window on this computer (it normally stays minimized).
 export async function bringToFront(botId) {
   const m = machine(botId);
   if (onLaptop(botId)) { emit('computer', { ...status(botId), focus: true }); return; } // the app opens its screen
   await setWindowState(botId, 'normal').catch(() => {});
-  const script = m.pid
-    ? `tell application "System Events" to set frontmost of (first process whose unix id is ${m.pid}) to true`
-    : null;
-  if (script) execFile('osascript', ['-e', script], () => {});
+  focusProcess(m.pid);
   const list = await pages(botId);
   if (list[0]) await cdpBrowser(botId, 'Target.activateTarget', { targetId: list[0].id }).catch(() => {});
 }

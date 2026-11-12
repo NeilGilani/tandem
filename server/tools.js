@@ -13,6 +13,7 @@ import * as computer from './computer.js';
 import * as vault from './vault.js';
 import * as approvals from './approvals.js';
 import * as mac from './mac.js';
+import { MACHINE } from './platform.js';
 import { CATALOG } from './catalog.js';
 import * as activity from './activity.js';
 import * as missions from './missions.js';
@@ -129,7 +130,8 @@ export const DEFS = [
   ['mac_reminders_complete', 'Reminders (Mac): mark reminders with this name complete.', S({ name: str('') }, ['name'])],
   ['mac_notify', 'Alarms & notifications (Mac): show a notification now or as a timer up to 24 hours ahead.', S({ title: str(''), message: str(''), inMinutes: num('Delay in minutes') }, ['message'])],
   ['mac_messages_recent', 'Messages (Mac): read recent iMessages.', S({ limit: num('') })],
-].map(([name, description, inputSchema]) => ({ name, description, inputSchema }));
+].filter(([name]) => !name.startsWith('mac_') || CATALOG.some((c) => c.tools?.includes(name))) // Mac apps only where they exist
+  .map(([name, description, inputSchema]) => ({ name, description: name === 'mac_notify' ? description.replace('(Mac)', `(this ${MACHINE})`) : description, inputSchema }));
 
 // ---- Cards that wait for you ---------------------------------------------------------
 const waiters = new Map(); // message id -> resolve
@@ -312,6 +314,7 @@ export async function call(tool, args = {}, ctx) {
   const isMacTool = tool.startsWith('mac_');
   if (isMacTool) {
     const app = CATALOG.find((c) => c.tools?.includes(tool));
+    if (!app) return 'That app only exists on a Mac, and Tandem is running on another kind of computer.';
     const ok = connectors.installed(ctx.botId).some((c) => c.catalog_id === app.id);
     if (!ok) return `${app.name} isn't connected. Call request_connect with "${app.name}" first.`;
     return mac.TOOLS[tool](args);
@@ -584,10 +587,9 @@ export async function draftSkillFromTeach(t) {
   const prompt = `The user demonstrated a browser task so it can be saved as a reusable skill.\nIntended result: ${t.goal}\n\n` +
     `Screenshots were taken every 2 seconds. Read the image files below in order with the Read tool, work out what they did, then write the skill.\n\n${timeline}\n\n` +
     'Reply with JSON only: {"name":"short name","description":"when to use it","body":"Markdown with sections: When to use, Inputs and access needed, Steps, Validation, What to return, Approval needed before"}';
-  const { spawn } = await import('node:child_process');
-  const { CLAUDE_BIN, childEnv } = await import('./claude.js');
+  const { spawnClaude, childEnv } = await import('./claude.js');
   const out = await new Promise((resolve, reject) => {
-    const child = spawn(CLAUDE_BIN, ['-p', prompt, '--model', 'sonnet', '--output-format', 'json', '--tools', 'Read', '--allowedTools', 'Read',
+    const child = spawnClaude(prompt, ['--model', 'sonnet', '--output-format', 'json', '--tools', 'Read', '--allowedTools', 'Read',
       '--setting-sources', '', '--strict-mcp-config', '--no-session-persistence', '--add-dir', t.dir], { cwd: t.dir, env: childEnv() });
     let o = '', e = '';
     child.stdout.on('data', (d) => (o += d));

@@ -1,17 +1,18 @@
 // The toolbox: a Python every Bot can use right away, with the usual packages for data,
 // charts, documents and scraping already installed. Built once in the background so a
 // Bot never stalls mid-task waiting on pip.
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { PATHS } from './db.js';
+import { systemPython, venvPython } from './platform.js';
 
 const PACKAGES = ['pandas', 'numpy', 'matplotlib', 'openpyxl', 'xlsxwriter', 'requests', 'beautifulsoup4', 'lxml',
   'python-docx', 'python-pptx', 'pypdf', 'reportlab', 'pillow', 'python-dateutil', 'tabulate'];
 const VERSION = `1:${PACKAGES.join(',')}`;
 
 const DIR = path.join(PATHS.data, 'toolbox', 'py');
-const PY = path.join(DIR, 'bin', 'python');
+const PY = venvPython(DIR);
 const MARK = path.join(DIR, '.tandem-ready');
 let building = null;
 let state = 'idle'; // idle | building | ready | unavailable
@@ -23,16 +24,9 @@ function ready() {
   try { return fs.readFileSync(MARK, 'utf8') === VERSION && fs.existsSync(PY); } catch { return false; }
 }
 
-function systemPython() {
-  for (const p of ['/opt/homebrew/bin/python3', '/usr/local/bin/python3', '/usr/bin/python3']) {
-    if (!fs.existsSync(p)) continue;
-    try { execFileSync(p, ['-c', 'import venv, ensurepip'], { stdio: 'ignore', timeout: 20000 }); return p; } catch {}
-  }
-  return null;
-}
 
 const sh = (cmd, args) => new Promise((resolve, reject) => {
-  const child = spawn(cmd, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+  const child = spawn(cmd, args, { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
   let err = '';
   child.stderr.on('data', (d) => (err = (err + d).slice(-2000)));
   child.on('close', (code) => (code === 0 ? resolve() : reject(new Error(err.trim().split('\n').pop() || `exit ${code}`))));

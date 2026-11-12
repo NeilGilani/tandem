@@ -9,6 +9,7 @@ import * as connectors from './connectors.js';
 import * as toolbox from './toolbox.js';
 import * as company from './company.js';
 import * as office from './office.js';
+import { MACHINE, WIN } from './platform.js';
 
 const laptopFolders = (botId) => {
   let extra = []; try { extra = JSON.parse(setting('laptop_folders') || '[]'); } catch {}
@@ -83,7 +84,9 @@ ${computer.onLaptop(bot.id) ? `You have your own laptop: a Linux (Debian) comput
   them to another Bot, and tell that Bot the path.
 - Browser: the \`mcp__playwright__browser_*\` tools drive your own Chrome. Its sign-ins persist between tasks.
   Prefer browser_snapshot to read pages; take screenshots only when layout matters. Keep at least one tab open.
-- Command line: Bash runs on the user's own Mac, subject to their execution setting.
+- Command line: Bash runs on the user's own ${MACHINE}, subject to their execution setting.${WIN ? `
+  This is Windows: Bash is Git Bash, so use forward slashes (C:/Users/...) and Unix commands; Mac-only commands (open, osascript,
+  pbcopy, brew) don't exist. For Windows-only things run \`powershell.exe -NoProfile -Command "..."\`.` : ''}
 ${toolbox.promptBlock()}
 - Work keeps running after the user closes the app.`}
 

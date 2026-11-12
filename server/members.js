@@ -3,7 +3,7 @@
 // things stay yours alone: your Gmail, app sign-ins and saved logins, settings, and who's on
 // the team. Optional company API key so shared use bills to the company, not your Claude plan.
 import crypto from 'node:crypto';
-import { execFile } from 'node:child_process';
+import * as secrets from './secrets.js';
 import { db, all, get, run, now, uid, PATHS, setting, setSetting } from './db.js';
 import { setApiKey } from './claude.js';
 import { emit } from './bus.js';
@@ -87,13 +87,12 @@ export function canResolve(who, card, payload = {}) {
 const SERVICE = 'Tandem accounts';
 const NS = crypto.createHash('sha1').update(PATHS.data).digest('hex').slice(0, 8);
 const ITEM = `${NS}:anthropic-api-key`;
-const sh = (args) => new Promise((resolve, reject) => execFile('security', args, (err, out) => (err ? reject(err) : resolve(out.trim()))));
 
 export const billing = () => ({ mode: setting('billing_mode') === 'api' ? 'api' : 'plan', key_hint: setting('api_key_hint') || '' });
 
 export async function loadApiKey() {
   if (setting('billing_mode') !== 'api') return setApiKey(null);
-  setApiKey(await sh(['find-generic-password', '-s', SERVICE, '-a', ITEM, '-w']).catch(() => null));
+  setApiKey(await secrets.get(SERVICE, ITEM).catch(() => null));
 }
 
 export async function setBilling({ mode, apiKey }) {
@@ -104,7 +103,7 @@ export async function setBilling({ mode, apiKey }) {
     const r = await fetch('https://api.anthropic.com/v1/models?limit=1', { headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' } }).catch(() => null);
     if (!r) throw new Error('Couldn\'t reach Anthropic to check the key. Try again.');
     if (r.status === 401 || r.status === 403) throw new Error('Anthropic rejected that key. Copy it again from console.anthropic.com.');
-    await sh(['add-generic-password', '-U', '-s', SERVICE, '-a', ITEM, '-l', 'Tandem: Anthropic API key', '-w', key]);
+    await secrets.set(SERVICE, ITEM, key, 'Tandem: Anthropic API key');
     setSetting('api_key_hint', `${key.slice(0, 10)}…${key.slice(-4)}`);
   } else if (!setting('api_key_hint')) throw new Error('Paste the company API key first.');
   setSetting('billing_mode', 'api');

@@ -18,6 +18,7 @@ import * as chats from './chats.js';
 import * as computer from './computer.js';
 import { emit } from './bus.js';
 import * as activity from './activity.js';
+import { MACHINE, WIN } from './platform.js';
 
 const RULE_LIMIT = 20;
 const BACKGROUND_TTL = 10 * 60 * 1000; // a Bot on a shift moves on after this
@@ -90,9 +91,14 @@ const READ_ONLY_PROGRAMS = new Set(['ls', 'cat', 'head', 'tail', 'grep', 'egrep'
 
 // "Only risky commands" mode: everyday local work (reading, writing and organizing files,
 // running scripts, fetching pages) runs on its own. These are the things that still ask.
-const SCRIPT_PROGRAMS = /^(python3?|node|ruby|perl|swift|php|deno|bun|bash|sh|zsh)$/;
+const SCRIPT_PROGRAMS = /^(python3?|py|node|ruby|perl|swift|php|deno|bun|bash|sh|zsh|powershell|pwsh|cmd|cscript|wscript)(\.exe)?$/i;
 const SENSITIVE_PATH = /(~|\$HOME|\/Users\/[^/\s"']+)\/(\.(ssh|aws|gnupg|netrc|zshrc|zprofile|zshenv|bashrc|bash_profile|profile|gitconfig|kube|docker)\b|\.config\/gh\b|Library\/(Keychains|LaunchAgents|Cookies)\b)|(^|[\s"'=:])\/(etc|System|bin|sbin|private\/etc|Library\/(LaunchDaemons|LaunchAgents|Keychains))\b|(^|[\s"'=:])\/usr\/(?!local\b)/;
-const safeTarget = (a) => a && a !== '""' && a !== "''" && !/^(~|\$|\.\.|\*$|\/(?!tmp\/|private\/tmp\/|var\/folders\/))/.test(a);
+// The same idea on Windows: your profile's keys and sign-ins, startup folders, and Windows itself.
+const WIN_HOME = String.raw`(~|\$HOME|%USERPROFILE%|\$env:USERPROFILE|[A-Za-z]:[\\/]+Users[\\/]+[^\\/\s"']+|\/[a-z]\/Users\/[^/\s"']+)`;
+const WIN_SECRETS = String.raw`[\\/]+(\.(ssh|aws|gnupg|kube|docker)\b|AppData[\\/]+(Roaming|Local)[\\/]+(Microsoft[\\/]+(Credentials|Protect|Vault)|Google[\\/]+Chrome[\\/]+User Data|Microsoft[\\/]+Edge[\\/]+User Data)|AppData[\\/]+Roaming[\\/]+gh\b)`;
+const WIN_SENSITIVE = new RegExp(`${WIN_HOME}(${WIN_SECRETS}|[\\\\/]+AppData[\\\\/]+Roaming[\\\\/]+Microsoft[\\\\/]+Windows[\\\\/]+Start Menu[\\\\/]+Programs[\\\\/]+Startup)|([A-Za-z]:|\\/[a-z])[\\\\/]+(Windows|Program Files|ProgramData)\\b|\\bHK(LM|CU|CR|EY_)`, 'i');
+const WIN_PRIVATE = new RegExp(WIN_HOME + WIN_SECRETS, 'i');
+const safeTarget = (a) => a && a !== '""' && a !== "''" && !/^(~|\$|%|\.\.|\*$|[A-Za-z]:|\\|\/(?!tmp\/|private\/tmp\/|var\/folders\/))/.test(a);
 
 export function localRisk(command) {
   const c = String(command);
@@ -103,21 +109,26 @@ export function localRisk(command) {
     const targets = args.filter((a) => !a.startsWith('-'));
     if (p === 'rm' || p === 'rmdir' || p === 'unlink' || p === 'shred') { if (!targets.length || !targets.every(safeTarget)) w.add('Deletes files outside its working folder'); }
     else if (p === 'find' && args.some((a) => a === '-delete' || a === '-exec' || a === '-execdir')) w.add('Deletes or changes many files');
-    else if (/^(kill|pkill|killall)$/.test(p)) w.add('Stops programs running on your Mac');
-    else if (p === 'osascript') w.add('Controls other apps on your Mac');
-    else if (p === 'brew' && /^(install|reinstall|upgrade|uninstall|remove|tap)$/.test(args[0] || '')) w.add('Installs or removes software on your Mac');
-    else if (/^(npm|pnpm|yarn)$/.test(p) && args.some((a) => a === '-g' || a === '--global' || a === 'global')) w.add('Installs software for your whole Mac');
-    else if (/^(gem|port|softwareupdate|installer|mas)$/.test(p)) w.add('Installs or removes software on your Mac');
+    else if (/^(kill|pkill|killall)$/.test(p)) w.add(`Stops programs running on your ${MACHINE}`);
+    else if (p === 'osascript') w.add(`Controls other apps on your ${MACHINE}`);
+    else if (p === 'brew' && /^(install|reinstall|upgrade|uninstall|remove|tap)$/.test(args[0] || '')) w.add(`Installs or removes software on your ${MACHINE}`);
+    else if (/^(npm|pnpm|yarn)$/.test(p) && args.some((a) => a === '-g' || a === '--global' || a === 'global')) w.add(`Installs software for your whole ${MACHINE}`);
+    else if (/^(gem|port|softwareupdate|installer|mas)$/.test(p)) w.add(`Installs or removes software on your ${MACHINE}`);
+    // Windows (Git Bash, cmd or PowerShell spellings)
+    else if (/^(del|erase|rd|remove-item|ri)(\.exe)?$/i.test(p)) { if (!targets.length || !targets.every(safeTarget)) w.add('Deletes files outside its working folder'); }
+    else if (/^(taskkill|stop-process|tskill)(\.exe)?$/i.test(p)) w.add(`Stops programs running on your ${MACHINE}`);
+    else if (/^(winget|choco|scoop|msiexec)(\.exe)?$/i.test(p) && (p.toLowerCase().startsWith('msiexec') || /^(install|uninstall|upgrade|update|remove)$/i.test(args[0] || ''))) w.add(`Installs or removes software on your ${MACHINE}`);
+    else if (/^(reg|regedit|schtasks|netsh|bcdedit|sc|icacls|takeown|cmdkey|wmic|powercfg|set-executionpolicy|new-itemproperty|set-itemproperty|register-scheduledtask)(\.exe)?$/i.test(p)) w.add('This changes system or security settings');
     else if (p === 'crontab' || p === 'pmset' || p === 'networksetup' || p === 'scutil' || p === 'csrutil' || p === 'spctl') w.add('This changes system or security settings');
   }
   const writes = /(^|[^<>&0-9])>>?\s*[^&\s]|\btee\b|\b(cp|mv|ln|chmod|touch|mkdir|install|sed\s+-i|perl\s+-pi)\b/.test(c);
   const scripts = progs.some((p) => SCRIPT_PROGRAMS.test(p));
-  if (SENSITIVE_PATH.test(c) && (writes || scripts)) w.add('Touches system, sign-in or startup files');
+  if ((SENSITIVE_PATH.test(c) || (WIN && WIN_SENSITIVE.test(c))) && (writes || scripts)) w.add('Touches system, sign-in or startup files');
   if (scripts) {
     // A script's own code is in the command (inline or a heredoc): look at what it does.
     if (/requests\.(post|put|patch|delete)\(|urlopen\([^)]*data\s*=|method\s*[:=]\s*['"](POST|PUT|PATCH|DELETE)|smtplib|sendmail|axios\.(post|put|patch|delete)|\bcurl\b[^\n]*\s(-d|--data\S*|-F|-T|-X\s*(POST|PUT|PATCH|DELETE))\s/i.test(c)) w.add('This shares your data outside this computer');
     if (/shutil\.rmtree|os\.(remove|unlink|rmdir|removedirs)\(|\.unlink\(|unlinkSync|rmSync|rmdirSync|send2trash|\brm\s+-\w*[rf]/.test(c)) w.add('Deletes files');
-    if (/keyring|Keychain|find-(generic|internet)-password/i.test(c)) w.add('Reads saved passwords');
+    if (/keyring|Keychain|find-(generic|internet)-password|cmdkey|CredentialManager|Get-StoredCredential|ProtectedData|secrets\.(key|json)/i.test(c)) w.add('Reads saved passwords');
   }
   return [...w];
 }
@@ -126,7 +137,7 @@ function shellDanger(command) {
   const c = String(command);
   const progs = programsOf(c);
   const w = [];
-  if (progs.includes('sudo')) w.push('Runs with administrator rights');
+  if (progs.includes('sudo') || /\brunas\b|-Verb\s+RunAs/i.test(c)) w.push('Runs with administrator rights');
   if (/\brm\s+(-\w*[rf]\w*\s+)+/.test(c) || /\bgit\s+(reset\s+--hard|clean\s+-\w*f|push\s+(-f|--force))/.test(c)) w.push("This can't be undone");
   if (/\bgit\s+push\b/.test(c) || /\b(scp|rsync|ssh|sftp|ftp|nc)\b/.test(c)
     || /\bcurl\b[^\n]*(\s-X\s*(POST|PUT|PATCH|DELETE)|\s(-d|--data\S*|-F|--form|-T|--upload-file)\s)/.test(c)
@@ -135,6 +146,12 @@ function shellDanger(command) {
   }
   if (/\b(defaults\s+write|launchctl|security\s+(delete|add)|chmod\s+-R|chown)\b/.test(c)) w.push('This changes system or security settings');
   if (/\bsecurity\s+(find-(generic|internet)-password|dump-keychain)\b/.test(c)) w.push('Reads saved passwords');
+  if (WIN) {
+    if (/\b(reg(\.exe)?\s+(add|delete|import)|schtasks|netsh|bcdedit|Set-ExecutionPolicy|icacls|takeown|Register-ScheduledTask)\b/i.test(c)) w.push('This changes system or security settings');
+    if (/\bcmdkey\b|Get-StoredCredential|secrets\.(key|json)\b/i.test(c)) w.push('Reads saved passwords');
+    if (/\b(Remove-Item|ri|rd|rmdir|del)\b[^\n|;]*\s[-/](Recurse|r\b|s\b)/i.test(c)) w.push("This can't be undone");
+    if (WIN_PRIVATE.test(c)) w.push('Reads private keys or saved sign-ins');
+  }
   if (/(~|\$HOME|\/Users\/[^/\s"']+)\/(\.(ssh|aws|gnupg|netrc|kube|docker)\b|\.config\/gh\b|Library\/(Keychains|Cookies)\b)/.test(c)) w.push('Reads private keys or saved sign-ins');
   return w;
 }

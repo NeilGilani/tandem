@@ -2,7 +2,7 @@
 // (stored in the Keychain); every Bot then searches, reads and organizes mail through Gmail's
 // own IMAP server at the same time, and drafts you approve are sent through Gmail's SMTP
 // server, landing in your Sent folder. No browser sessions, so nothing for Google to sign out.
-import { execFile } from 'node:child_process';
+import * as secrets from './secrets.js';
 import crypto from 'node:crypto';
 import { ImapFlow } from 'imapflow';
 import nodemailer from 'nodemailer';
@@ -13,13 +13,12 @@ import { emit } from './bus.js';
 const SERVICE = 'Tandem accounts';
 const NS = crypto.createHash('sha1').update(PATHS.data).digest('hex').slice(0, 8);
 const ITEM = `${NS}:gmail-app-password`;
-const sh = (args) => new Promise((resolve, reject) => execFile('security', args, (err, out) => (err ? reject(err) : resolve(out.trim()))));
 
 export const email = () => setting('gmail_email') || '';
 export const connected = () => !!email();
 
 async function password() {
-  const p = await sh(['find-generic-password', '-s', SERVICE, '-a', ITEM, '-w']).catch(() => '');
+  const p = await secrets.get(SERVICE, ITEM).catch(() => '');
   if (!p) throw new Error('Gmail is not connected. Call request_connect with "Gmail".');
   return p;
 }
@@ -45,14 +44,14 @@ export async function connect({ address, appPassword }) {
     if (e.authenticationFailed || /AUTHENTICATIONFAILED|Invalid credentials|auth/i.test(why)) throw new Error('Gmail rejected that app password. Check the address and paste the 16 letters again.');
     throw new Error(`Couldn't reach Gmail: ${(e.responseText || e.message || 'unknown error').slice(0, 160)}`);
   }
-  await sh(['add-generic-password', '-U', '-s', SERVICE, '-a', ITEM, '-l', 'Tandem: Gmail app password', '-w', pass]);
+  await secrets.set(SERVICE, ITEM, pass, 'Tandem: Gmail app password');
   setSetting('gmail_email', user);
   emit('connectors');
   return { email: user };
 }
 
 export async function disconnect() {
-  await sh(['delete-generic-password', '-s', SERVICE, '-a', ITEM]).catch(() => {});
+  await secrets.remove(SERVICE, ITEM).catch(() => {});
   setSetting('gmail_email', '');
   emit('connectors');
 }

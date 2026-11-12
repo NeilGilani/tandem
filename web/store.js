@@ -1,5 +1,5 @@
 // App state shared by every view, kept fresh by server-sent events.
-import { api } from './lib.js';
+import { api, setHost } from './lib.js';
 
 export const S = {
   bots: [], chats: [], sections: [], runs: [], connectors: [], settings: {}, computers: {},
@@ -25,6 +25,7 @@ export function fire(evt, data) { for (const fn of listeners.get(evt) || []) fn(
 export async function refresh() {
   const st = await api('GET', '/api/state');
   Object.assign(S, st);
+  setHost(S.settings);
   fire('state');
 }
 

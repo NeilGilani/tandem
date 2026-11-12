@@ -12,6 +12,13 @@ export async function api(method, path, body, { raw = false, headers = {} } = {}
 }
 
 // h('div.cls#id', {attrs, on: {click}}, ...children)
+// Shortcut labels are written the Mac way; other keyboards get Ctrl, Alt and Shift.
+const APPLE = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '');
+export const keys = (s) => (APPLE ? s : String(s).replace(/⌥Space on your Mac/, 'Ctrl+J').replace(/[⌘⌃]/g, 'Ctrl+').replace(/⇧/g, 'Shift+').replace(/⌥/g, 'Alt+').replace(/⌫/g, 'Backspace').replace(/\+(?=$|\s|\))/g, ''));
+// The computer Tandem runs on ("Mac", "PC") and where it keeps secrets; set from the server's settings.
+export const host = { machine: 'Mac', secrets: 'your Mac\'s Keychain' };
+export const setHost = (s = {}) => { if (s.machine) host.machine = s.machine; if (s.secrets_where) host.secrets = s.secrets_where; };
+
 export function h(tag, attrs, ...kids) {
   if (attrs == null || typeof attrs !== 'object' || attrs instanceof Node || Array.isArray(attrs)) { kids.unshift(attrs); attrs = {}; }
   const [, name = 'div', rest = ''] = tag.match(/^([a-z0-9-]*)(.*)$/i);
@@ -25,11 +32,11 @@ export function h(tag, attrs, ...kids) {
     else if (k === 'html') el.innerHTML = v;
     else if (['value', 'checked', 'disabled', 'readOnly', 'selected', 'hidden', 'textContent'].includes(k)) el[k] = v;
     else if (k in el && typeof v !== 'string') el[k] = v;
-    else el.setAttribute(k, v === true ? '' : v);
+    else el.setAttribute(k, v === true ? '' : k === 'title' ? keys(v) : v);
   }
   for (const kid of kids.flat(Infinity)) {
     if (kid == null || kid === false) continue;
-    el.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
+    el.append(kid instanceof Node ? kid : document.createTextNode(name === 'kbd' || name === 'small' ? keys(kid) : String(kid)));
   }
   return el;
 }

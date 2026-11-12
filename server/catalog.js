@@ -5,6 +5,7 @@
 // use it. `auth` lists cookies whose presence means "signed in"; when a service's
 // cookies are unknown, status is confirmed when you finish the sign-in and press
 // "I'm done".  Mac apps (Calendar, Contacts, Reminders) are native tools.
+import { MAC, WIN, MACHINE } from './platform.js';
 
 const C = (id, name, category, url, domains, auth, tips, color) =>
   ({ id, name, category, kind: 'browser', url, domains, auth, tips, color });
@@ -181,6 +182,13 @@ export const CATALOG = [
 // iMessage is read through the Mac Messages database, so it is a Mac tool too.
 const im = CATALOG.find((c) => c.id === 'imessage');
 Object.assign(im, { kind: 'mac', tools: ['mac_messages_recent'], category: 'This Mac' });
+
+// Off a Mac, the Mac apps aren't there. Windows keeps notifications.
+if (!MAC) {
+  for (let i = CATALOG.length - 1; i >= 0; i--) if (CATALOG[i].kind === 'mac' && !(WIN && CATALOG[i].id === 'mac_notify')) CATALOG.splice(i, 1);
+  const n = CATALOG.find((c) => c.id === 'mac_notify');
+  if (n) Object.assign(n, { category: `This ${MACHINE}`, tips: `Show a notification or set a timer (up to 24 hours) on this ${MACHINE}.` });
+}
 
 export const byId = Object.fromEntries(CATALOG.map((c) => [c.id, c]));
 export const CATEGORIES = [...new Set(CATALOG.map((c) => c.category))];

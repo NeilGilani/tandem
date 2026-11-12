@@ -29,7 +29,8 @@ import * as workday from './workday.js';
 import * as company from './company.js';
 import * as office from './office.js';
 import * as missions from './missions.js';
-import { spawn as spawnProc } from 'node:child_process';
+import { MACHINE, findChrome, keepAwake } from './platform.js';
+import { WHERE as SECRETS_WHERE } from './secrets.js';
 import { CATEGORIES } from './catalog.js';
 
 const PORT = Number(process.env.PORT || 4747);
@@ -141,6 +142,9 @@ function lastPreview(chatId) {
 function publicSettings(who = { owner: true }) {
   return {
     billing: members.billing(),
+    platform: process.platform,
+    machine: MACHINE,
+    secrets_where: SECRETS_WHERE,
     auto_review: setting('auto_review') === '1',
     toolbox: toolbox.status().state,
     draft_reviews: setting('draft_reviews') === '1',
@@ -365,7 +369,7 @@ route('DELETE', '/api/members/:id', (req, res, p) => { members.revoke(p.id); ret
 route('POST', '/api/network', async (req) => {
   const on = !!(await readJson(req)).on;
   setSetting('network_access', on ? '1' : '0');
-  const auto = process.env.TANDEM_APP === 'mac';
+  const auto = !!process.env.TANDEM_APP; // the Mac and Windows apps restart the server themselves
   if (auto && (HOST === '0.0.0.0') !== on) setTimeout(() => process.exit(0), 400);
   return { on, restarting: auto, needsRestart: !auto && (HOST === '0.0.0.0') !== on };
 });
@@ -392,7 +396,7 @@ route('GET', '/api/health', async () => {
     if (err && !out) return resolve({ installed: false, loggedIn: false });
     try { const j = JSON.parse(out); resolve({ installed: true, loggedIn: !!j.loggedIn, method: j.authMethod }); } catch { resolve({ installed: true, loggedIn: false }); }
   }));
-  const chrome = ['/Applications/Google Chrome.app', '/Applications/Chromium.app', '/Applications/Microsoft Edge.app', '/Applications/Brave Browser.app'].some((p) => fs.existsSync(p)) || !!process.env.TANDEM_CHROME;
+  const chrome = !!findChrome();
   return { claude, chrome, node: process.versions.node };
 });
 route('GET', '/api/plan', () => ({ plan: activity.plan(), guard: activity.routinesShouldWait() }));
@@ -571,13 +575,13 @@ if (laptop.enabled()) laptop.prepare(); // Bot laptops: start the VM, build the 
 await members.loadApiKey().catch(() => {});
 routines.recover();
 setInterval(() => missions.tick(), 15 * 1000);
-// Keep the Mac from idle-sleeping while Bots work or a mission wakes soon (the lid still sleeps it).
+// Keep the computer from idle-sleeping while Bots work or a mission wakes soon (the lid still sleeps it).
 let caffeinate = null;
 setInterval(() => {
   const need = engine.activeRuns().length > 0 || missions.needsAwake();
-  if (need && !caffeinate && process.platform === 'darwin') {
-    caffeinate = spawnProc('caffeinate', ['-i', '-w', String(process.pid)], { stdio: 'ignore' });
-    caffeinate.on('exit', () => { caffeinate = null; });
+  if (need && !caffeinate) {
+    caffeinate = keepAwake();
+    if (caffeinate) { const c = caffeinate; c.on('error', () => {}); c.on('exit', () => { if (caffeinate === c) caffeinate = null; }); }
   } else if (!need && caffeinate) { caffeinate.kill(); caffeinate = null; }
 }, 20 * 1000);
 computer.startIdleReaper((botId) => engine.activeRuns().some((r) => r.botId === botId));

@@ -4,6 +4,7 @@
 import { execFile } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
+import * as platform from './platform.js';
 
 const jxa = (script, args = []) => new Promise((resolve, reject) => {
   execFile('osascript', ['-l', 'JavaScript', '-e', script, ...args.map(String)], { timeout: 60000, maxBuffer: 8 << 20 },
@@ -82,7 +83,7 @@ export async function remindersComplete({ name }) {
 
 export async function notify({ title = 'Tandem', message, inMinutes = 0 }) {
   const delay = Math.min(Math.max(Number(inMinutes) || 0, 0), 24 * 60);
-  const fire = () => jxa(`function run(a){ const app = Application.currentApplication(); app.includeStandardAdditions = true;
+  const fire = () => platform.WIN ? platform.notify(title, message).then((ok) => (ok ? 'ok' : 'Could not show the notification')) : jxa(`function run(a){ const app = Application.currentApplication(); app.includeStandardAdditions = true;
     app.displayNotification(a[1], { withTitle: a[0], soundName: 'Glass' }); return 'ok'; }`, [title, message]);
   if (!delay) return parse(await fire());
   setTimeout(() => fire().catch(() => {}), delay * 60000);
