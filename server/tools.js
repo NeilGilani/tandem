@@ -22,6 +22,7 @@ import * as accounts from './accounts.js';
 import * as company from './company.js';
 import * as office from './office.js';
 import * as gmail from './gmail.js';
+import * as workday from './workday.js';
 
 let engine = null;
 export const attach = (e) => { engine = e; };
@@ -39,7 +40,7 @@ export const DEFS = [
   ['recall', 'Show everything in your memory.', S({})],
   ['log_work', 'Add a dated line to your work log.', S({ text: str('What you did') }, ['text'])],
   ['list_bots', "List the user's other Bots.", S({})],
-  ['message_bot', "Send an asynchronous message to another of the user's Bots. It wakes up, handles it, and (if expect_reply) its reply comes back to you.",
+  ['message_bot', "Message a teammate. During work sessions it lands in their inbox and they handle it in their next session (their reply comes to your inbox); don't wait for it. When the user is chatting with you, it's delivered right away.",
     S({ to: str('Bot name'), text: str('The message / task'), expect_reply: bool('Default true') }, ['to', 'text'])],
   ['list_skills', 'List skills in the shared library that are enabled for you.', S({})],
   ['get_skill', 'Load a skill by name.', S({ name: str('Skill name') }, ['name'])],
@@ -62,7 +63,7 @@ export const DEFS = [
     S({ name: str('Name for the item, e.g. "Salesforce login"'), site: str('Domain it is for'), username: str('Username if known'), purpose: str('Why you need it'), kind: { type: 'string', enum: ['login', 'secret'] } }, ['name', 'purpose'])],
   ['draft_message', 'Show an outgoing email/Slack/Teams/other message to the user as a draft card with Send and Discard. Do not send it yourself.',
     S({ app: str('Gmail, Outlook, Slack, Teams, LinkedIn, …'), to: str('Recipient(s) or channel'), cc: str(''), subject: str(''), body: str('Full message text'), thread: str('Thread/conversation it replies to, if any') }, ['app', 'to', 'body'])],
-  ['ask_user', 'Ask the user a question (optionally with choices or a short form) and wait for the answer.',
+  ['ask_user', "Ask when you're stuck. In a chat with the user, it asks them and waits. During work sessions it goes to your boss (or to the user if it's truly their call) and you DON'T wait: move on to other work; the answer arrives in your inbox.",
     S({ question: str('The question'), options: { type: 'array', items: { type: 'string' }, description: 'Choices' }, fields: { type: 'array', items: { type: 'string' }, description: 'Form field labels' } }, ['question'])],
   ['add_to_library', 'Add a result (file in the workspace, page, image, video or link) to your Library.',
     S({ title: str('Title'), ref: str('Absolute file path or URL'), kind: { type: 'string', enum: ['page', 'image', 'video', 'file', 'link'] } }, ['title', 'ref'])],
@@ -99,8 +100,12 @@ export const DEFS = [
   ['update_task', 'Record progress on one of your assignments: status (todo, doing, blocked) and a short note.', S({ id: str('Assignment id'), status: { type: 'string', enum: ['todo', 'doing', 'blocked'] }, note: str('') }, ['id'])],
   ['submit_task', 'Hand in a finished assignment with the result (what you did, where the files are). It goes to your boss for review.', S({ id: str('Assignment id'), result: str('The result and file paths') }, ['id', 'result'])],
   ['review_task', "Review an assignment one of your reports submitted: approve it, or send it back with clear notes on what to fix.", S({ id: str('Assignment id'), verdict: { type: 'string', enum: ['approve', 'send_back'] }, notes: str('') }, ['id', 'verdict'])],
-  ['review_draft', "Review a draft message one of your reports wrote before it reaches Neil: approve (optionally fixing subject or body) or send back with notes.",
+  ['review_draft', "Decide on a routine draft one of your reports wrote. approve sends it right away (you may fix subject or body first); send_back returns it with notes.",
     S({ card_id: str('The draft card id from the review request'), verdict: { type: 'string', enum: ['approve', 'send_back'] }, notes: str('What you changed, or what they should fix'), subject: str('Fixed subject (optional)'), body: str('Fixed body (optional)') }, ['card_id', 'verdict'])],
+  ['answer_teammate', "Answer a question one of your reports asked you (id from your inbox). Decide it yourself; that's your job as their boss.",
+    S({ id: str('Question id from your inbox'), answer: str('Your decision, in a line or two') }, ['id', 'answer'])],
+  ['escalate_to_neil', "Pass a report's question to the founder because only they can decide it (money, signing, investors, first impressions with important people, hiring, legal, direction). Not for anything you can decide.",
+    S({ id: str('Question id from your inbox'), note: str('One line of context or your recommendation') }, ['id'])],
   ['post_report', 'Post your standup (start of your shift: yesterday, today, blockers) or end-of-day report (shipped, open, blocked). Your boss and Neil see it on the Company page.',
     S({ kind: { type: 'string', enum: ['standup', 'eod'] }, text: str('Three or four short lines') }, ['kind', 'text'])],
   ['request_hire', 'Ask Neil to hire a new Bot onto your team, when there is more steady work in your area than you and your reports can do. Neil approves or declines.',
@@ -186,6 +191,7 @@ export function resolveCard(msgId, payload) {
     }
     case 'question':
       card.answer = payload.answer;
+      if (card.async) workday.deliver({ to: msg.bot_id, from: 'user', kind: 'answer', text: String(payload.answer), ref: card.question });
       return done('answered', { answer: payload.answer });
     case 'secret':
       if (payload.dismiss) return done('dismissed', { dismissed: true });
@@ -199,6 +205,7 @@ export function resolveCard(msgId, payload) {
       });
     case 'takeover':
       computer.endTakeover(msg.bot_id);
+      if (card.async) { done('done'); workday.deliver({ to: msg.bot_id, from: 'user', kind: 'message', text: `Done with the step you needed: ${card.reason}. Your browser is yours again.` }); }
       return onTakeoverEnded(msg.bot_id).then(() => true);
     case 'draft': {
       if (msg.meta?.actId) activity.finish(msg.meta.actId, payload.action === 'discard' ? 'discarded' : 'sent');
@@ -217,10 +224,11 @@ export function resolveCard(msgId, payload) {
         })();
       }
       done('sent');
-      engine.runBot(msg.bot_id, msg.chat_id,
-        `The user pressed Send on your ${draft.app} draft. Send it now exactly as written below, then confirm briefly.\n` +
+      const approver = card.approvedBy;
+      engine.runBot(msg.bot_id, approver ? chats.officeFor(msg.bot_id).id : msg.chat_id,
+        `${approver ? `${approver}, your boss, approved your ${draft.app} draft.` : `The user pressed Send on your ${draft.app} draft.`} Send it now exactly as written below, then confirm briefly. If you can't send it, say exactly why.\n` +
         `To: ${draft.to}${draft.cc ? `\nCc: ${draft.cc}` : ''}${draft.subject ? `\nSubject: ${draft.subject}` : ''}${draft.thread ? `\nIn reply to: ${draft.thread}` : ''}\n\n${draft.body}`,
-        { origin: 'chat', preapproved: true });
+        { origin: approver ? 'handoff' : 'chat', preapproved: true });
       return true;
     }
     case 'skill_draft':
@@ -358,15 +366,25 @@ export async function call(tool, args = {}, ctx) {
       if (!m?.card || m.card.type !== 'draft' || m.card.status !== 'review') return 'That draft is not waiting for review.';
       if (company.bossOf(m.bot_id)?.id !== ctx.botId) return 'Only the writer\'s boss reviews this draft.';
       const me = chats.getBot(ctx.botId).name;
+      if (args.verdict === 'approve' && m.card.routine) {
+        chats.updateMessage(m.id, { card: { ...m.card, status: 'pending', reviewedBy: me, reviewNote: args.notes || null, approvedBy: me } });
+        await resolveCard(m.id, { action: 'send', edits: { ...(args.subject ? { subject: args.subject } : {}), ...(args.body ? { body: args.body } : {}) } });
+        const direct = gmail.connected() && /@/.test(m.card.to || '');
+        activity.log({ botId: ctx.botId, kind: 'decision', summary: `Approved ${chats.getBot(m.bot_id)?.name}'s email to ${m.card.to}`, detail: m.card.subject || '', status: 'ok', origin: 'company' });
+        return direct ? `Approved and sent to ${m.card.to}.` : `Approved. ${chats.getBot(m.bot_id)?.name} is sending it now.`;
+      }
       if (args.verdict === 'approve') {
         chats.updateMessage(m.id, { card: { ...m.card, status: 'pending', ...(args.subject ? { subject: args.subject } : {}), ...(args.body ? { body: args.body } : {}), reviewedBy: me, reviewNote: args.notes || null } });
         emit('notify', { botId: m.bot_id, chatId: m.chat_id, title: 'Draft ready for you', body: `${chats.getBot(m.bot_id)?.name}'s draft to ${m.card.to}, reviewed by ${me}` });
         return 'Approved. It is in Neil\'s inbox now.';
       }
       chats.updateMessage(m.id, { card: { ...m.card, status: 'returned', reviewedBy: me, reviewNote: args.notes || '' } });
-      engine.runInOffice(m.bot_id, `[${me} sent your draft back] To: ${m.card.to}${m.card.subject ? `, "${m.card.subject}"` : ''}\nNotes: ${args.notes || '(none)'}\nFix it and draft again if it's still needed.`, { origin: 'handoff' }).catch(() => {});
+      workday.deliver({ to: m.bot_id, from: ctx.botId, kind: 'draft_back', text: `To: ${m.card.to}${m.card.subject ? `, "${m.card.subject}"` : ''}. Notes: ${args.notes || '(none)'}. Fix it and draft again if it's still needed.` });
       return 'Sent back with your notes.';
     }
+    case 'answer_teammate': return workday.answer(ctx.botId, args.id, args.answer);
+    case 'escalate_to_neil': return workday.escalate(ctx.botId, args.id, args.note, ({ botId, question }) =>
+      postCard({ botId, chatId: chats.dmFor(botId).id, origin: 'mission' }, { type: 'question', question, options: [], async: true, for: 'user' }));
     case 'post_report': company.postReport(ctx.botId, args.kind === 'eod' ? 'eod' : 'standup', args.text); return 'Posted.';
     case 'request_hire': {
       const msg = postCard(ctx, { type: 'hire', title: `Hire a ${args.title}`, role: args.title, why: args.why, name: args.name || '', boss: ctx.botId });
@@ -403,6 +421,13 @@ export async function call(tool, args = {}, ctx) {
     case 'message_bot': {
       const text = [args.text, args.message, args.body, args.content].find((x) => typeof x === 'string' && x.trim());
       if (!text) throw new Error('Put the message in "text".');
+      if (ctx.origin !== 'chat') {
+        const target = chats.findBot(args.to || args.bot || args.name);
+        if (!target) throw new Error(`No Bot named ${args.to}`);
+        if (target.id === ctx.botId) throw new Error("You can't message yourself");
+        workday.deliver({ to: target.id, from: ctx.botId, kind: 'message', text: args.expect_reply === false ? text : `${text}\n(Reply with message_bot to ${bot.name}.)` });
+        return `In ${target.name}'s inbox. They'll handle it in their next session${args.expect_reply === false ? '' : ' and reply to your inbox'}. Don't wait: keep working.`;
+      }
       return engine.handoff({ fromBot: ctx.botId, fromChat: ctx.chatId, to: args.to || args.bot || args.name, text, expectReply: args.expect_reply !== false, depth: Number(ctx.depth || 0) });
     }
     case 'list_skills': return skills.enabledFor(ctx.botId).map((s) => ({ name: s.name, description: s.description }));
@@ -432,6 +457,7 @@ export async function call(tool, args = {}, ctx) {
       if (app.id === 'gmail') {
         if (gmail.connected()) return `Gmail (${gmail.email()}) is connected. Use gmail_search, gmail_read and gmail_update, and draft_message for anything outgoing. Don't use the browser for Gmail.`;
         const msg = postCard(ctx, { type: 'gmail_connect', title: 'Connect Gmail for your whole team', name: 'Gmail' });
+        if (ctx.origin !== 'chat') return 'Asked Neil to connect Gmail. Don\'t wait: do other work now and try Gmail again in a later session.';
         const res = await waitCard(msg.id, ctx);
         return res.connected ? `Gmail is connected for the whole team. Use gmail_search, gmail_read and gmail_update.` : 'The user didn\'t connect Gmail yet.';
       }
@@ -447,6 +473,7 @@ export async function call(tool, args = {}, ctx) {
         if (c.status === 'Connected') return `${app.name} is connected with the team's sign-in. Continue.`;
       }
       const msg = postCard(ctx, { type: 'connect', connectorId: c.id, name: app.name, color: app.color, title: `Connect ${app.name}` }, '');
+      if (ctx.origin !== 'chat') return `Asked Neil to connect ${app.name}. Don't wait: do other work now and try ${app.name} again in a later session.`;
       const res = await waitCard(msg.id, ctx);
       return res.connected ? `${app.name} is connected. Continue.` : res.expired ? 'The Connect card expired.' : `The user didn't connect ${app.name}.`;
     }
@@ -454,9 +481,11 @@ export async function call(tool, args = {}, ctx) {
       if (gmail.connected() && /\b(gmail|google|inbox|mail)\b/i.test(args.reason || '') && /sign|log ?in|signed out|account chooser/i.test(args.reason || '')) {
         return `Don't sign in to Gmail in the browser: Gmail (${gmail.email()}) is connected for the whole team. Use gmail_search, gmail_read and gmail_update, and draft_message to send.`;
       }
-      const msg = postCard(ctx, { type: 'takeover', reason: args.reason, title: 'Take over the computer' });
+      const bg = ctx.origin !== 'chat';
+      const msg = postCard(ctx, { type: 'takeover', reason: args.reason, title: 'Take over the computer', ...(bg ? { async: true } : {}) });
       computer.startTakeover({ reason: args.reason, botId: ctx.botId, chatId: msg.chat_id });
       computer.bringToFront(ctx.botId).catch(() => {});
+      if (bg) return 'Asked Neil to do this step on your laptop. Don\'t wait: work on things that don\'t need the browser now. Your inbox tells you when he\'s done.';
       const res = await waitCard(msg.id, ctx);
       if (res.expired && computer.machine(ctx.botId).control === 'user') computer.endTakeover(ctx.botId);
       return res.expired ? 'Nobody took over within 30 minutes. Report that this step needs the user.' : 'The user pressed I\'m done. Continue from the current page.';
@@ -476,6 +505,7 @@ export async function call(tool, args = {}, ctx) {
     }
     case 'request_secret': {
       const msg = postCard(ctx, { type: 'secret', name: args.name, site: args.site || '', username: args.username || '', purpose: args.purpose, kind: args.kind || 'login', title: `Save ${args.name} to Vault` });
+      if (ctx.origin !== 'chat') return `Asked Neil to save ${args.name}. Don't wait: do other work now and try again in a later session.`;
       const res = await waitCard(msg.id, ctx);
       return res.saved ? `Saved "${res.saved}" in the Vault. Use vault_fill_login on the sign-in page.` : res.expired ? 'The request expired.' : 'The user declined.';
     }
@@ -486,24 +516,36 @@ export async function call(tool, args = {}, ctx) {
       const norm = (x) => String(x || '').toLowerCase().replace(/\s+/g, '');
       const mine = all(`SELECT * FROM messages WHERE bot_id = ? AND card LIKE '%"type":"draft"%' AND created > ? ORDER BY created DESC LIMIT 60`, ctx.botId, now() - 21 * 864e5)
         .map(chats.parseMsg).find((m) => ['pending', 'review', 'returned'].includes(m.card?.status) && norm(m.card.to) === norm(args.to));
+      // Routine emails go to the writer's boss, who approves and sends them. Big ones (where the
+      // impression matters for the company's future) go to Neil. Nobody waits on either.
+      const route = ctx.origin === 'chat' ? { route: 'owner', why: '' } : await workday.triageEmail(ctx.botId, { ...args, thread: args.thread || mine?.card.thread });
+      const boss = route.route === 'boss' ? route.boss : null;
+      const routing = boss
+        ? { status: 'review', reviewer: boss.name, reviewSince: now(), routine: true, big: false, why: route.why }
+        : { status: 'pending', routine: false, big: ctx.origin !== 'chat', why: route.why, reviewer: null };
+      const askBoss = (msg) => workday.deliver({ to: boss.id, from: ctx.botId, kind: 'review', ref: msg.id,
+        text: `To: ${args.to}${args.cc ? ` (cc ${args.cc})` : ''}${args.subject ? `\nSubject: ${args.subject}` : ''}\n\n${args.body}` });
       if (mine) {
-        const reviewNow = company.needsDraftReview(ctx.botId);
         chats.updateMessage(mine.id, { card: { ...mine.card, app: args.app, cc: args.cc || mine.card.cc || '', subject: args.subject ?? mine.card.subject, body: args.body, thread: args.thread || mine.card.thread || '',
-          status: reviewNow ? 'review' : 'pending', reviewedBy: null, reviewNote: null, ...(reviewNow ? { reviewSince: now() } : {}) } });
-        if (reviewNow) company.requestDraftReview(chats.getMessage(mine.id), ctx.botId);
-        return `Updated your existing draft to ${args.to}.`;
+          reviewedBy: null, reviewNote: null, ...routing } });
+        if (boss) askBoss(mine);
+        return `Updated your existing draft to ${args.to}${boss ? `; ${boss.name} decides on it` : ''}. Keep working.`;
       }
-      // A Bot with a boss: the draft goes to the boss for review before it reaches you.
-      const review = company.needsDraftReview(ctx.botId);
-      const boss = review ? company.bossOf(ctx.botId) : null;
-      const dm = postCard(ctx, { type: 'draft', app: args.app, to: args.to, cc: args.cc || '', subject: args.subject || '', body: args.body, thread: args.thread || '', title: `${args.app} draft`,
-        ...(review ? { status: 'review', reviewer: boss.name, reviewSince: now() } : {}) });
-      if (review) company.requestDraftReview(dm, ctx.botId);
+      const dm = postCard(ctx, { type: 'draft', app: args.app, to: args.to, cc: args.cc || '', subject: args.subject || '', body: args.body, thread: args.thread || '', title: `${args.app} draft`, ...routing });
+      if (boss) askBoss(dm);
       const actId = activity.log({ runId: ctx.runId, botId: ctx.botId, chatId: dm.chat_id, kind: 'draft', tool: 'draft_message', summary: `${args.app} draft to ${args.to}${args.subject ? `: ${args.subject}` : ''}`, detail: args.body, status: 'pending', origin: ctx.origin });
       chats.updateMessage(dm.id, { meta: { ...(dm.meta || {}), actId } });
-      return review ? `The draft went to ${boss.name} for review; after that Neil sees it with Send and Discard. Do not send it yourself.` : 'The draft is shown to the user with Send and Discard. Do not send it yourself. If they press Send, you will be asked to send it.';
+      if (boss) return `Routine email: ${boss.name} reviews it and sends it. Don't send it yourself, and don't wait: keep working.`;
+      return ctx.origin === 'chat' ? 'The draft is shown to the user with Send and Discard. Do not send it yourself. If they press Send, you will be asked to send it.'
+        : `This one matters (${route.why || 'high stakes'}), so it goes to Neil. Don't send it yourself and don't wait for him: keep working on other things.`;
     }
     case 'ask_user': {
+      if (ctx.origin !== 'chat') {
+        const r = await workday.ask(ctx, { question: String(args.question || ''), options: args.options || [] });
+        if (r.routed === 'boss') return `Asked ${r.to}, your boss. Don't wait: carry on with your other work now. The answer arrives in your inbox in a later session.`;
+        postCard({ ...ctx, chatId: chats.dmFor(ctx.botId).id }, { type: 'question', question: args.question, options: args.options || [], fields: args.fields || [], async: true, for: 'user' });
+        return 'Asked Neil. Don\'t wait: carry on with your other work now. His answer arrives in your inbox in a later session.';
+      }
       const msg = postCard(ctx, { type: 'question', question: args.question, options: args.options || [], fields: args.fields || [] });
       const res = await waitCard(msg.id, ctx);
       return res.expired ? 'No answer within 30 minutes.' : { answer: res.answer };

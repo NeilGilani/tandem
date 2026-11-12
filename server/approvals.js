@@ -20,7 +20,7 @@ import { emit } from './bus.js';
 import * as activity from './activity.js';
 
 const RULE_LIMIT = 20;
-const BACKGROUND_TTL = 30 * 60 * 1000;
+const BACKGROUND_TTL = 10 * 60 * 1000; // a Bot on a shift moves on after this
 const pending = new Map(); // card message id -> { resolve, timer, input, ctx, structured }
 
 // Structured rule columns (added after v0.1).
@@ -139,6 +139,21 @@ function shellDanger(command) {
   return w;
 }
 
+// A Bot's commands on its own laptop run in a container, so they just run. Two exceptions,
+// refused without asking anyone: deleting in the folders shared with the Mac (real files),
+// and pushing code.
+export function laptopShell(command) {
+  const c = String(command);
+  if (/\bgit\s+push\b/.test(c)) return 'Pushing code needs Neil. Note it in your end-of-day report and keep working on something else.';
+  const destructive = localRisk(c).some((w) => /^Deletes/.test(w)) || shellDanger(c).includes("This can't be undone") || /\bgit\s+(reset\s+--hard|clean\b|checkout\s+--\s)/.test(c);
+  if (!destructive) return null;
+  let shared = [];
+  try { shared = JSON.parse(setting('laptop_folders') || '[]'); } catch {}
+  const hit = shared.find((f) => f && c.includes(f));
+  if (hit) return `That deletes or overwrites files in ${hit}, a folder with Neil's real files. Work on a copy in your own workspace instead.`;
+  return null;
+}
+
 function browserDanger(tool, input, pageUrl) {
   const t = `${input.element || ''} ${input.text || ''} ${(input.fields || []).map((f) => f.name).join(' ')}`;
   const w = [];
@@ -242,6 +257,9 @@ export async function decide(tool, input, ctx) {
 
   let pageUrl = '';
   if (BROWSER_ANY.test(tool)) {
+    if (computer.machine(ctx.botId).control === 'user' && ctx.origin !== 'chat') {
+      return { behavior: 'deny', message: 'Neil is using your browser right now (a step you asked him for). Work on something that doesn\'t need the browser; your inbox tells you when it\'s yours again.' };
+    }
     if (computer.machine(ctx.botId).control === 'user') {
       computer.setActivity(ctx.botId, 'Waiting, you have control');
       await computer.waitForBotControl(ctx.botId);
@@ -255,6 +273,10 @@ export async function decide(tool, input, ctx) {
   // Ask-first rules always win.
   if (structuredMatch(tool, input, pageUrl, 'ask')) return ask(tool, input, summary, pageUrl, ctx, { kind: 'rule', reason: 'Matches one of your Ask first rules' });
 
+  if (tool === 'Bash' && computer.onLaptop(ctx.botId) && !ctx.preapproved) {
+    const v = laptopShell(input.command);
+    return v ? { behavior: 'deny', message: v } : allow();
+  }
   if (tool === 'Bash') {
     const mode = setting('local_execution');
     if (mode === 'never') return { behavior: 'deny', message: 'Running commands on this computer is set to Never allow.' };
@@ -338,7 +360,7 @@ export function answer(msgId, choice) {
     p.resolve({
       behavior: 'deny',
       message: choice === 'expire'
-        ? 'The approval request expired after 30 minutes. Stop and report that this step needs approval.'
+        ? 'No answer on this approval yet. Skip this step for now, note it in your plan, and keep working on everything else.'
         : 'The user denied this action. Do not retry it or ask again until the user sends another message.',
     });
   }

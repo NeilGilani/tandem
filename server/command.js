@@ -19,6 +19,12 @@ async function route(text) {
   const bots = chats.listBots();
   if (!bots.length) throw new Error('Create a Bot first');
   if (bots.length === 1) return { owner: bots[0], title: text.slice(0, 80) };
+  // "Rex: …", "Rex, …" or "@Rex …" picks that Bot directly.
+  const named = bots.find((b) => new RegExp(`^\\s*@?${b.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*[:,]|^\\s*@${b.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(text));
+  if (named) {
+    const j = await quickJson(`Write a short title (max 8 words, imperative) for this request: "${text.slice(0, 600)}". Reply JSON only: {"title":"..."}`, { timeoutMs: 20000 }).catch(() => ({}));
+    return { owner: named, title: String(j.title || text).slice(0, 80) };
+  }
   const roster = bots.map((b) => {
     const facts = memory.recall(b.id).bot.facts.slice(0, 4).map((f) => f.text.slice(0, 160)).join(' / ');
     return `- ${b.name}${b.title ? ` (${b.title})` : ''}: ${facts || 'no job notes'}`;
@@ -86,5 +92,9 @@ export function feed() {
   const chief = chats.listBots().find((b) => /chief/i.test(b.title || ''));
   const brief = chief ? get("SELECT text, created FROM messages WHERE bot_id = ? AND author = 'bot' AND text != '' AND meta LIKE '%\"origin\":\"routine\"%' AND created > ? ORDER BY created DESC LIMIT 1",
     chief.id, now() - 20 * 3600e3) : null;
-  return { working, done: [...done, ...sent].sort((a, b) => b.at - a.at).slice(0, 30), brief: brief ? { text: brief.text, at: brief.created, bot: chief.name } : null };
+  const decided = all("SELECT bot_id, summary, detail, created FROM actions WHERE kind = 'decision' AND created > ? ORDER BY created DESC LIMIT 20", since)
+    .map((a) => ({ kind: 'decided', title: a.summary, result: (a.detail || '').split('\n')[0].slice(0, 200), botId: a.bot_id, bot: name(a.bot_id), at: a.created }));
+  const rot = missions.rotation();
+  const shift = { slots: rot.slots, on: rot.on.map(name), next: rot.queued.map(name) };
+  return { shift, working, done: [...done, ...sent, ...decided].sort((a, b) => b.at - a.at).slice(0, 40), brief: brief ? { text: brief.text, at: brief.created, bot: chief.name } : null };
 }

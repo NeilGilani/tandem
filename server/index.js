@@ -25,6 +25,7 @@ import * as accounts from './accounts.js';
 import * as gmail from './gmail.js';
 import * as command from './command.js';
 import * as members from './members.js';
+import * as workday from './workday.js';
 import * as company from './company.js';
 import * as office from './office.js';
 import * as missions from './missions.js';
@@ -41,6 +42,7 @@ squads.attach(engine);
 company.attach(engine);
 office.attach(engine);
 command.attach(engine);
+workday.attach(engine);
 engine.onRunEnd(({ opts, text, error, stopped }) => { if (opts.taskId && !error && !stopped && text) command.closeIfOpen(opts.taskId, text); });
 
 const WEB = path.join(ROOT, 'web');

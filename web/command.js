@@ -27,6 +27,9 @@ function draw() {
   $root.replaceChildren(h('div.page.cx', h('div.page-in',
     h('div.cx-hello', h('h1', hello), h('span.hint', S.bots.length ? `${S.runs.filter((r) => !r.squadId).length} working · ${S.bots.length} on the team` : ''), h('a.hint.cx-dash', { href: '#/home/board' }, 'Full dashboard')),
     ($box ||= askBox()),
+    feed.shift && h('div.cx-shift', icon('users'),
+      feed.shift.slots === 0 ? 'Everyone\'s paused until your Claude limit resets'
+        : `On shift: ${feed.shift.on.length ? feed.shift.on.join(', ') : 'nobody right now'}${feed.shift.next.length ? ` · next up: ${feed.shift.next.join(', ')}` : ''} · ${feed.shift.slots} at a time`),
     feed.brief && h('div.cx-brief', h('button.cx-brief-h', { on: { click: () => { briefOpen = !briefOpen; draw(); } } }, icon('sparkle'), h('b', 'Morning brief'), h('span.hint', `${feed.brief.bot} · ${ago(feed.brief.at) === 'now' ? 'just now' : `${ago(feed.brief.at)} ago`}`), h('span.cx-brief-t', briefOpen ? 'Hide' : 'Read')),
       briefOpen && h('div.md.cx-brief-b', { html: md(feed.brief.text) })),
     h('div.cx-cols',
@@ -86,7 +89,7 @@ function decisions() {
   for (const [botId, list] of byBot) {
     const many = list.length > 1;
     out.push(dcard(botId, many ? `Send these ${list.length} emails?` : `Send to ${list[0].card.to}?`,
-      many ? list.map((d) => d.card.to).slice(0, 5).join(', ') + (list.length > 5 ? ` and ${list.length - 5} more` : '') : list[0].card.subject || list[0].card.body.slice(0, 90),
+      many ? list.map((d) => d.card.to).slice(0, 5).join(', ') + (list.length > 5 ? ` and ${list.length - 5} more` : '') : [list[0].card.subject || list[0].card.body.slice(0, 90), list[0].card.why && ` · Yours because: ${list[0].card.why}`].filter(Boolean).join(''),
       [[many ? `Send all ${list.length}` : 'Send', true, async () => { for (const d of list) await card(d, { action: 'send' }); toast(many ? `Sending ${list.length}` : 'Sending'); }],
         ['Review', false, () => openInboxAt(list[0].id)],
         [many ? 'Skip all' : 'Skip', false, async () => { for (const d of list) await card(d, { action: 'discard' }); }]]));
@@ -138,7 +141,7 @@ function workRow(w) {
 }
 function doneRow(d) {
   return h('button.cx-row', { on: { click: () => details(d) } },
-    h('span.cx-ic.done', icon(d.kind === 'sent' ? 'send' : 'check')),
+    h(`span.cx-ic.done${d.kind === 'decided' ? '.boss' : ''}`, icon(d.kind === 'sent' ? 'send' : d.kind === 'decided' ? 'hand' : 'check')),
     h('div.cx-t', h('b', d.title), d.result && h('span.cx-r', d.result), h('span', `${d.bot}${by(d.by)} · ${ago(d.at) === 'now' ? 'just now' : `${ago(d.at)} ago`}`)));
 }
 function details(d) {

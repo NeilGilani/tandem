@@ -143,7 +143,7 @@ export function requestDraftReview(msg, ownerId) {
 // Reviews that sit too long go to you anyway, marked as not reviewed.
 export function tickDraftReviews() {
   const stale = all("SELECT * FROM messages WHERE card LIKE '%\"status\":\"review\"%'").map(chats.parseMsg)
-    .filter((m) => m.card?.status === 'review' && now() - (m.card.reviewSince || m.created) > REVIEW_TTL);
+    .filter((m) => m.card?.status === 'review' && now() - (m.card.reviewSince || m.created) > (m.card.routine ? 26 * 3600e3 : REVIEW_TTL));
   for (const m of stale) chats.updateMessage(m.id, { card: { ...m.card, status: 'pending', reviewNote: `${m.card.reviewer || 'The boss'} didn't review this in time` } });
 }
 
@@ -184,7 +184,10 @@ export function promptBlock(bot) {
   const co = companyName();
   return `## Your job${co ? ` at ${co}` : ''}
 You are ${bot.title ? `the ${bot.title}` : 'an employee'}${co ? ` at ${co}` : ''}, reporting to ${boss ? `${boss.name}${boss.title ? ` (${boss.title})` : ''}` : 'Neil, the founder'}.${reports.length ? ` Your team: ${reports.map((r) => r.name).join(', ')}; you can hand them work with assign_task.` : ''}
-You own your area end to end. Do the work yourself; involve teammates only when the work is truly theirs.${open.length ? `
+You own your area end to end. Do the work yourself; involve teammates only when the work is truly theirs.${reports.length ? `
+As a boss you decide for your reports: answer their questions (answer_teammate) and approve or send back their routine
+emails (review_draft; approving sends them). Pass a question up with escalate_to_neil only when it's truly the founder's
+call (money, signing, investors, first impressions with important people, hiring, legal, direction).` : ''}${open.length ? `
 Your open assignments:
 ${open.slice(0, 8).map((t) => `- ${t.title} (id ${t.id})${t.due ? `, due ${t.due}` : ''}`).join('\n')}
 Mark them done with submit_task when finished.` : ''}`;

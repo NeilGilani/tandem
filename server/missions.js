@@ -11,6 +11,7 @@ import { emit } from './bus.js';
 import * as chats from './chats.js';
 import * as activity from './activity.js';
 import * as company from './company.js';
+import * as workday from './workday.js';
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS missions (
@@ -25,6 +26,8 @@ CREATE TABLE IF NOT EXISTS missions (
 
 const FRESH_EVERY = 6; // sessions per conversation before starting fresh from plan + notes
 const CONTINUE_DELAY = 20e3;
+const SHIFT_BUDGET = 24;      // sessions a day a shift Bot may use; the rotation is what really limits it
+const MAX_SHIFT_WAIT = 75 * 60e3; // on shift, never idle longer than this without re-checking inbox and backlog
 let engine = null;
 export const attach = (e) => { engine = e; };
 
@@ -117,14 +120,16 @@ export function checkpoint(botId, { note, next = 'continue', wait_until, wait_re
     return { recorded: true, status: 'done' };
   }
   if (next === 'blocked') {
-    save(m.id, { notes, status: 'blocked', block_reason: String(blocked_reason || note || 'Needs you').slice(0, 600), next_wake: null });
-    emit('notify', { botId, chatId: m.chat_id, title: `${chats.getBot(botId)?.name} needs you`, body: blocked_reason || note });
-    return { recorded: true, status: 'blocked', note: 'The user is notified. Your mission resumes when they reply or press Resume.' };
+    // A person with one stuck item works on the rest. The block is recorded; the shift goes on.
+    const reason = String(blocked_reason || note || 'Waiting on a decision').slice(0, 600);
+    save(m.id, { notes, status: 'waiting', block_reason: reason, next_wake: now() + 30 * 60e3, wake_reason: `One item is stuck (${reason.slice(0, 120)}). Work on everything else.` });
+    return { recorded: true, status: 'waiting', note: 'Recorded. Next session in about 30 minutes: work on other items then. If you need a decision, ask_user routes it to your boss.' };
   }
   if (next === 'wait') {
     let t = wait_until ? Date.parse(wait_until) : NaN;
     if (Number.isNaN(t)) t = now() + 60 * 60e3;
     t = Math.max(t, now() + 60e3);
+    if (inHours(m).ok) t = Math.min(t, now() + MAX_SHIFT_WAIT);
     save(m.id, { notes, status: 'waiting', next_wake: t, wake_reason: String(wait_reason || note || '').slice(0, 300) });
     return { recorded: true, status: 'waiting', wakes: new Date(t).toLocaleString('en-US', { timeZone: timezone() }) };
   }
@@ -175,11 +180,23 @@ ${m.plan || '(no plan yet: write one with set_mission_plan as a Markdown checkli
 Recent notes:
 ${recent}
 
-${shiftNote(m)}Work on the next unchecked items for as long as it's useful in this session. Keep the plan current with set_mission_plan
+${workday.inboxBlock(m.bot_id)}${backlog(m.bot_id)}${shiftNote(m)}You're on shift. Work like an employee who doesn't need supervision: handle your inbox first (answer your
+reports' questions and review their drafts; that's your job as a boss), then work through your assignments and plan.
+If one item is stuck waiting on someone, skip it and do the next one; never end the session just because one thing is
+blocked. Decide things in your lane yourself. Ask with ask_user only when you truly can't proceed; it goes to your boss and
+you keep working.
+
+Work on the next unchecked items for as long as it's useful in this session. Keep the plan current with set_mission_plan
 (check items off as you finish them). Then call mission_checkpoint exactly once with what you did and what's next:
 next="continue" to keep going right away, next="wait" with wait_until (ISO time) when you're waiting on the world
 (replies, a deadline, office hours), next="blocked" when you need the user, or next="done" with a summary when the
 done criteria are met and verified. End the session with one short line for the user.`;
+}
+
+function backlog(botId) {
+  const open = company.tasks({ ownerId: botId, open: true });
+  if (!open.length) return '';
+  return `Your open assignments:\n${open.slice(0, 8).map((t) => `- ${t.id}: ${t.title} (${t.status}${t.due ? `, due ${t.due}` : ''})`).join('\n')}\n\n`;
 }
 
 export function isBusy(botId) { return engine.activeRuns().some((r) => r.botId === botId); }
@@ -192,9 +209,10 @@ export async function runSession(m) {
   if (!hours.ok) return save(m.id, { status: 'waiting', next_wake: hours.retry, wake_reason: 'Waiting for working hours' });
   const today = new Date().toLocaleDateString('en-CA', { timeZone: timezone() });
   const sessionsToday = m.day === today ? m.sessions_today : 0;
-  if (sessionsToday >= m.daily_budget) {
+  const budget = m.hours && m.hours !== 'any' ? Math.max(m.daily_budget, SHIFT_BUDGET) : m.daily_budget;
+  if (sessionsToday >= budget) {
     const t = new Date(); t.setDate(t.getDate() + 1); t.setHours(8, 0, 0, 0);
-    return save(m.id, { status: 'waiting', next_wake: t.getTime(), wake_reason: `Used today's ${m.daily_budget} sessions. Continues tomorrow.`, day: today, sessions_today: sessionsToday });
+    return save(m.id, { status: 'waiting', next_wake: t.getTime(), wake_reason: `Used today's ${budget} sessions. Continues tomorrow.`, day: today, sessions_today: sessionsToday });
   }
   // Start a fresh conversation every few sessions; the plan and notes carry the context.
   const n = m.sessions + 1;
@@ -225,10 +243,37 @@ export function onUserMessage(chatId, botId) {
   if (m && m.status === 'blocked' && m.chat_id === chatId) save(m.id, { status: 'active', block_reason: null, next_wake: now() + 30e3 });
 }
 
+// Rotating shifts: only a few Bots work at once (sized to how much of the Claude plan is left).
+// Due Bots wait their turn: bosses with questions from their reports first, then whoever has
+// worked least today.
 export function tick() {
-  for (const m of all("SELECT * FROM missions WHERE status IN ('active','waiting') AND next_wake IS NOT NULL AND next_wake <= ?", now()).map(parse)) {
-    runSession(m).catch((e) => { console.error('mission', m.id, e.message); save(m.id, { next_wake: now() + 5 * 60e3 }); });
+  const due = all("SELECT * FROM missions WHERE status IN ('active','waiting') AND next_wake IS NOT NULL AND next_wake <= ?", now()).map(parse);
+  if (!due.length) return;
+  const working = engine.activeRuns().filter((r) => r.origin === 'mission').length;
+  let free = workday.slots() - working;
+  const cmp = (a, b) => { const x = workday.priority(a), y = workday.priority(b); for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return x[i] - y[i]; return 0; };
+  for (const m of due.sort(cmp)) {
+    // Off-shift and over-budget checks don't use a slot.
+    if (!inHours(m).ok || free > 0) {
+      if (inHours(m).ok) free--;
+      runSession(m).catch((e) => { console.error('mission', m.id, e.message); save(m.id, { next_wake: now() + 5 * 60e3 }); });
+    }
   }
+}
+
+// A new inbox item for a Bot on shift: bring its next session forward.
+workday.onWake((botId) => {
+  const m = activeFor(botId);
+  if (!m || !['active', 'waiting'].includes(m.status)) return false;
+  if (inHours(m).ok && (!m.next_wake || m.next_wake > now() + 3 * 60e3)) save(m.id, { next_wake: now() + 60e3 });
+  return true; // it reads its inbox at its next session (now, or when its shift starts)
+});
+
+// Who's on shift now and who's waiting their turn (for the Home screen).
+export function rotation() {
+  const on = engine.activeRuns().filter((r) => r.origin === 'mission').map((r) => r.botId);
+  const queued = all("SELECT bot_id FROM missions WHERE status IN ('active','waiting') AND next_wake IS NOT NULL AND next_wake <= ?", now()).map((x) => x.bot_id).filter((b) => !on.includes(b));
+  return { slots: workday.slots(), on, queued };
 }
 
 // Missions due while the Mac was off or asleep run shortly after Tandem starts.

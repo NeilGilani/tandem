@@ -1004,3 +1004,6 @@ button.org-node:hover { border-color: var(--line-2); transform: translateY(-1px)
 }
 .cx-wait { font-size: 12.5px; color: var(--text-3); padding: 2px 4px; }
 .sender-lbl { font-size: 11.5px; color: var(--text-3); text-align: right; margin: 0 4px 2px; }
+.cx-shift { display: flex; align-items: center; gap: 7px; margin-top: 12px; font-size: 12.5px; color: var(--text-2); }
+.cx-shift svg { width: 14px; height: 14px; color: var(--text-3); }
+.cx-ic.done.boss { background: var(--hover); color: var(--text-2); }
