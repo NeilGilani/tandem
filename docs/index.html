@@ -401,6 +401,69 @@ footer { padding: 64px 0 40px; }
   .big-stats b { font-size: 26px; }
 }
 @media (max-width: 560px) { .sqd-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .big-stats { grid-template-columns: 1fr 1fr 1fr; gap: 8px; } .big-stats div { padding: 12px; } .big-stats b { font-size: 22px; } }
+
+/* ---------- v0.11: company + laptops ---------- */
+.co-sec { display: grid; grid-template-columns: 1fr 1.2fr; gap: 56px; align-items: center; }
+.co-sec.flip { grid-template-columns: 1.2fr 1fr; }
+.co-stage, .lt-stage { background: linear-gradient(160deg, #e9effb, #f6f8fc); border-radius: 28px; padding: 26px; box-shadow: inset 0 0 0 1px var(--line); }
+.co-app { background: #fff; border-radius: 18px; padding: 20px; box-shadow: 0 30px 60px -40px rgba(10,20,60,.4), inset 0 0 0 1px var(--line); font-size: 13px; }
+.co-hello { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+.co-hello b { font: 600 19px var(--head); letter-spacing: -.02em; }
+.co-hello span { color: var(--ink-3); font-size: 12px; }
+.co-box { display: flex; align-items: center; gap: 9px; border: 1px solid #e3e7ee; border-radius: 16px; padding: 10px 10px 10px 14px; box-shadow: 0 8px 20px -14px rgba(20,30,60,.35); }
+.co-spark { color: #8a909d; }
+.co-typed { flex: 1; min-height: 18px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.co-typed::after { content: ""; display: inline-block; width: 1.5px; height: 14px; background: var(--ink); margin-left: 1px; vertical-align: -2px; animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.co-go { width: 26px; height: 26px; border-radius: 50%; background: var(--ink); flex: none; }
+.co-shift { display: flex; align-items: center; gap: 7px; margin: 10px 2px 16px; color: var(--ink-2); font-size: 12px; }
+.co-shift i { width: 7px; height: 7px; border-radius: 50%; background: #16a34a; box-shadow: 0 0 0 3px #dcf3e4; }
+.co-cols { display: grid; grid-template-columns: 1fr 1.15fr; gap: 14px; align-items: start; }
+.co-h { font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+.co-h em { font-style: normal; background: #e5484d; color: #fff; border-radius: 99px; padding: 0 6px; letter-spacing: 0; }
+.co-card { border: 1px solid #e3e7ee; border-radius: 12px; padding: 11px; display: grid; gap: 6px; }
+.co-card b { font-weight: 600; font-size: 13px; }
+.co-card p { color: var(--ink-2); font-size: 11.5px; line-height: 1.4; }
+.co-card > div:last-child { display: flex; gap: 5px; flex-wrap: wrap; }
+.co-who { display: flex; align-items: center; gap: 6px; color: var(--ink-3); font-size: 11px; }
+.co-rows { border: 1px solid #e9edf3; border-radius: 12px; overflow: hidden; }
+.co-row { display: flex; gap: 9px; padding: 9px 11px; border-top: 1px solid #eef1f5; animation: coin .5s ease-out both; }
+.co-row:first-child { border-top: 0; }
+.co-row i { flex: none; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-size: 10px; background: #e8f7ee; color: #16a34a; margin-top: 1px; }
+.co-row.boss i { background: #eef2fe; color: #2f5fc4; }
+.co-row b { display: block; font-weight: 600; font-size: 12px; line-height: 1.35; }
+.co-row span { color: var(--ink-3); font-size: 11px; }
+@keyframes coin { from { opacity: 0; transform: translateY(-4px); } }
+.lt-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.lt { background: #fff; border-radius: 14px; padding: 8px; box-shadow: inset 0 0 0 1px var(--line), 0 18px 34px -26px rgba(10,20,60,.45); }
+.lt-scr { aspect-ratio: 16 / 10; border-radius: 8px; overflow: hidden; background: linear-gradient(135deg, #2b3a55, #44587d); position: relative; display: flex; flex-direction: column; }
+.lt-win { margin: 9px 9px 0; flex: 1; background: #fff; border-radius: 5px 5px 0 0; padding: 0 0 6px; overflow: hidden; }
+.lt-url { font-size: 8.5px; color: #6b7280; background: #f1f3f6; padding: 3px 6px; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lt-l { height: 5px; border-radius: 3px; background: #e6e9ef; margin: 0 8px 5px; }
+.lt.on .lt-l:nth-child(3) { background: #cfdcf7; }
+.lt-term { margin: -6px 0 0; height: 100%; background: #0f141c; color: #a7f3c0; font: 9px/1.6 var(--mono); padding: 6px 8px; }
+.lt-term b { color: #fff; font-weight: 400; animation: blink 1s steps(1) infinite; }
+.lt-bar { height: 15px; background: rgba(12,16,24,.85); display: flex; align-items: center; gap: 3px; padding: 0 6px; }
+.lt-bar i { width: 6px; height: 6px; border-radius: 2px; background: #6b7a96; }
+.lt-bar span { margin-left: 5px; font-size: 8px; color: #c9d2e3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lt-who { display: flex; align-items: center; gap: 6px; padding: 8px 4px 2px; font-size: 12px; }
+.lt-who b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lt-who em { margin-left: auto; font-style: normal; font-size: 11px; color: var(--ink-3); display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.lt.on .lt-who em { color: #15803d; }
+.lt-mem { display: flex; align-items: center; gap: 10px; margin-top: 16px; font-size: 12.5px; color: var(--ink-2); }
+.lt-meter { flex: 1; height: 7px; border-radius: 99px; background: #dfe5ef; overflow: hidden; }
+.lt-meter i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #5f93e3, #2f5fc4); }
+.lt-mem b { font-weight: 600; color: var(--ink); }
+@media (max-width: 960px) {
+  .co-sec, .co-sec.flip { grid-template-columns: 1fr; gap: 32px; }
+  .co-sec.flip .lt-stage { order: 2; }
+  .co-stage, .lt-stage { padding: 14px; }
+}
+@media (max-width: 560px) {
+  .co-cols { grid-template-columns: 1fr; }
+  .lt-grid { gap: 10px; }
+  .lt-who em { display: none; }
+}
 </style>
 </head>
 <body>
@@ -413,8 +476,9 @@ footer { padding: 64px 0 40px; }
     </a>
     <nav class="menu">
       <a href="#how">How it works</a>
+      <a href="#company">Company</a>
+      <a href="#laptops">Laptops</a>
       <a href="#squads">Squads</a>
-      <a href="#speed">Speed</a>
       <a href="#features">Features</a>
       <a href="#apps">Apps</a>
       <a href="#install">Install</a>
@@ -436,7 +500,7 @@ footer { padding: 64px 0 40px; }
   <div class="glow"></div>
   <div class="wrap">
     <svg class="mark-hero" viewBox="0 0 512 512" aria-hidden="true"><rect width="512" height="512" rx="128" fill="#0e1116"/><circle cx="200" cy="256" r="90" fill="none" stroke="#fff" stroke-width="42"/><circle cx="312" cy="256" r="90" fill="none" stroke="#8fb4f5" stroke-width="42"/></svg>
-    <a class="new-pill" href="#squads"><span><b>New in 0.5:</b> Squads, five Bots on one job at once</span><i>See it<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></i></a>
+    <a class="new-pill" href="#company"><span><b>New:</b> a Linux laptop for every Bot, and a team that runs itself</span><i>See it<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></i></a>
     <h1>Coworkers that do the work.</h1>
     <p class="sub">Meet your Bots. They sign in to your apps and get it done, on your Mac, for free.</p>
     <a class="ask" href="#install" aria-label="Install Tandem">
@@ -504,7 +568,7 @@ footer { padding: 64px 0 40px; }
   <div class="wrap strip-in">
     <div class="cell"><b>$0</b><span>Free forever, MIT license</span></div>
     <div class="cell"><b>70+</b><span>Apps your Bots can use</span></div>
-    <div class="cell"><b>4x</b><span>Faster on real tasks in 0.5</span></div>
+    <div class="cell"><b>7</b><span>Linux laptops in 5 GB of memory</span></div>
     <div class="cell"><b>0</b><span>Accounts to create</span></div>
     <div class="cell txt"><h3>Open source, built in the open.</h3><p>Read every line, change anything. If it saves you time, a star helps other people find it.</p>
       <div><a class="pill ghost" href="https://github.com/NeilGilani/tandem" target="_blank" rel="noopener" style="height:34px;font-size:13px"><svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.75.75 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25Z"/></svg>Star on GitHub <span data-stars></span></a></div></div>
@@ -594,7 +658,73 @@ footer { padding: 64px 0 40px; }
   </div>
 </section>
 
-<!-- ============ FEATURES BAND ============ -->
+<!-- ============ COMPANY ============ -->
+<section id="company">
+  <div class="wrap co-sec">
+    <div class="rv">
+      <span class="kicker">New in 0.11</span>
+      <h2 class="sec-title">Say it once.<br>The team handles the rest.</h2>
+      <p class="sec-sub">Your Bots work like a company: titles, bosses and shifts. Type what you want in one line. The right Bot picks it up, bosses make the routine calls, and only the decisions that matter come to you.</p>
+      <div class="sq-pts">
+        <div><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v6M6 14v-2h12v2M6 14v4M18 14v4"/><circle cx="12" cy="4" r="1.6"/><circle cx="6" cy="19" r="1.6"/><circle cx="18" cy="19" r="1.6"/></svg></span><p><b>A real chain of command</b><span>Stuck Bots ask their boss, not you. Bosses decide, and pass up only what's truly yours: money, signatures, investors, first impressions.</span></p></div>
+        <div><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5.5" width="17" height="13" rx="2"/><path d="m4 7 8 6 8-6"/></svg></span><p><b>Routine email goes out, big email waits for you</b><span>A supplier quote gets the boss's OK and sends. A first note to an investor comes to you, with the reason why.</span></p></div>
+        <div><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg></span><p><b>Shifts that never stall</b><span>A blocked item doesn't end the day. Bots rotate through shifts sized to your Claude plan, bosses with questions first.</span></p></div>
+        <div><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><circle cx="17" cy="9" r="2.6"/><path d="M16.5 14.6c2.6.2 4.4 2 5 4.9"/></svg></span><p><b>Bring your cofounder</b><span>Teammates get their own sign-in link. Their requests carry their name, and their questions go to them.</span></p></div>
+      </div>
+    </div>
+    <div class="co-stage rv">
+      <div class="co-app">
+        <div class="co-hello"><b>Morning, Sam</b><span>2 on shift · 7 on the team</span></div>
+        <div class="co-box"><span class="co-spark">✦</span><span class="co-typed" id="coTyped"></span><span class="co-go"></span></div>
+        <div class="co-shift"><i></i>On shift: Head of Sales, Ops Lead · next up: Grant Writer</div>
+        <div class="co-cols">
+          <div>
+            <div class="co-h">Needs your call <em>1</em></div>
+            <div class="co-card"><div class="co-who"><span data-av="hexagon:#e0a030:F" data-s="16"></span>Fundraising</div>
+              <b>Send to partner@northwind.vc?</b>
+              <p>Intro: catching sick cattle early · Yours because: first investor outreach</p>
+              <div><span class="btn-s dark">Send</span><span class="btn-s">Review</span><span class="btn-s">Skip</span></div></div>
+          </div>
+          <div>
+            <div class="co-h">Done today</div>
+            <div class="co-rows" id="coRows">
+              <div class="co-row boss"><i>✓</i><div><b>Approved the quote request to Polycase</b><span>Ops Lead, for Manufacturing · 4m ago</span></div></div>
+              <div class="co-row boss"><i>✓</i><div><b>Decided for Research: start with Texas</b><span>Head of Sales · 12m ago</span></div></div>
+              <div class="co-row"><i>✓</i><div><b>Shortlist ready: 15 ranches, top 3 have power</b><span>Research · 31m ago</span></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ LAPTOPS ============ -->
+<section id="laptops">
+  <div class="wrap co-sec flip">
+    <div class="lt-stage rv">
+      <div class="lt-grid">
+        <div class="lt on"><div class="lt-scr"><div class="lt-win"><div class="lt-url">docs.google.com/document</div><div class="lt-l" style="width:80%"></div><div class="lt-l" style="width:64%"></div><div class="lt-l" style="width:72%"></div><div class="lt-l" style="width:40%"></div></div><div class="lt-bar"><i></i><i></i><i></i><span>Weekly brief.docx</span></div></div><div class="lt-who"><span data-av="star:#5f86e0:C" data-s="18"></span><b>Chief of Staff</b><em><span class="spin"></span>Working</em></div></div>
+        <div class="lt on"><div class="lt-scr"><div class="lt-win"><div class="lt-url">mail.google.com</div><div class="lt-l" style="width:90%"></div><div class="lt-l" style="width:90%"></div><div class="lt-l" style="width:90%"></div><div class="lt-l" style="width:90%"></div><div class="lt-l" style="width:60%"></div></div><div class="lt-bar"><i></i><i></i><i></i><span>Inbox — 6 replies</span></div></div><div class="lt-who"><span data-av="hexagon:#e0a030:S" data-s="18"></span><b>Head of Sales</b><em><span class="spin"></span>Working</em></div></div>
+        <div class="lt on"><div class="lt-scr"><div class="lt-win"><div class="lt-url">~/pilot2 — Terminal</div><div class="lt-term">$ python3 report.py<br>✓ 2 scenarios, 0 errors<br>$ <b>▍</b></div></div><div class="lt-bar"><i></i><i></i><i></i><span>Terminal</span></div></div><div class="lt-who"><span data-av="squircle:#10a37f:O" data-s="18"></span><b>Ops Lead</b><em><span class="spin"></span>Working</em></div></div>
+        <div class="lt"><div class="lt-scr"><div class="lt-win"><div class="lt-url">frc.ucanr.edu/apply</div><div class="lt-l" style="width:70%"></div><div class="lt-l" style="width:50%"></div><div class="lt-l" style="width:85%"></div><div class="lt-l" style="width:30%"></div></div><div class="lt-bar"><i></i><i></i><i></i><span>LibreOffice Writer</span></div></div><div class="lt-who"><span data-av="diamond:#d9468f:G" data-s="18"></span><b>Grant Writer</b><em>Idle</em></div></div>
+      </div>
+      <div class="lt-mem"><span>Memory for all laptops</span><div class="lt-meter"><i style="width:54%"></i></div><b>2.7 of 5 GB</b></div>
+    </div>
+    <div class="rv">
+      <span class="kicker">New in 0.6</span>
+      <h2 class="sec-title">Every Bot gets its own Linux laptop.</h2>
+      <p class="sec-sub">A real desktop with Chromium, LibreOffice, Python and a terminal, running in one small VM on your Mac. Your own browser stays yours.</p>
+      <div class="sq-pts">
+        <div><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="12" rx="2"/><path d="M2 19.5h20"/></svg></span><p><b>Watch any screen, take over anytime</b><span>See each laptop live. Need a passkey or a code? Grab the screen, do that one step, hand it back.</span></p></div>
+        <div><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></span><p><b>Sign in once, the whole team has it</b><span>Log in to an app on one laptop and every Bot can use it. Gmail connects once for everyone.</span></p></div>
+        <div><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 7.5A2 2 0 0 1 5.5 5.5h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/></svg></span><p><b>Your folders, your rules</b><span>Pick which Mac folders the laptops can open. Deleting in them is refused, so your real files stay safe.</span></p></div>
+        <div><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg></span><p><b>Seven laptops in 5 GB, and they heal themselves</b><span>Idle laptops sleep. A frozen screen or browser restarts on its own.</span></p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <!-- ============ SQUADS ============ -->
 <section id="squads">
   <div class="wrap sq-sec">
@@ -734,9 +864,9 @@ footer { padding: 64px 0 40px; }
   <div class="darkbox rv">
     <div style="position:relative;z-index:1">
       <h2>Everything a coworker needs, handled.</h2>
-      <p class="lead">Every Bot gets its own computer, signed in to just the tools it needs. They check with you before anything goes out.</p>
+      <p class="lead">Every Bot gets its own Linux laptop, signed in to the tools it needs. Routine work gets their boss's OK; anything big comes to you.</p>
       <div class="acc" id="acc">
-        <div class="acc-i on" data-lit="gm,ol,tm,sl"><b>Your email and chat</b><p>Gmail, Outlook, Teams and Slack. Bots read, sort and draft, and you press Send.</p></div>
+        <div class="acc-i on" data-lit="gm,ol,tm,sl"><b>Your email and chat</b><p>Gmail, Outlook, Teams and Slack. Connect Gmail once and every Bot can search, sort and draft. Routine replies go out on their boss's OK; big ones wait for you.</p></div>
         <div class="acc-i" data-lit="sf,hs,li,ln"><b>Your CRM and sales tools</b><p>Salesforce, HubSpot and LinkedIn: research, enrich, and log every touch.</p></div>
         <div class="acc-i" data-lit="gc,gd,gs,nt,ji"><b>Your docs, sheets and projects</b><p>Drive, Sheets, Notion, Jira and Linear, updated the way you'd do it yourself.</p></div>
         <div class="acc-i" data-lit="st,qb,sh,ex"><b>Your money, read-only by default</b><p>Stripe, QuickBooks and Shopify. Anything that spends or refunds stops for your OK.</p></div>
@@ -771,7 +901,7 @@ footer { padding: 64px 0 40px; }
         <div>Installing dependencies…</div>
         <div><span class="g">✓</span> Tandem is running at http://127.0.0.1:4747</div>
       </div>
-      <p class="req">The command needs Node 22.13+. Both need Google Chrome and Claude Code. Remove it anytime with <code style="font:13px var(--mono);color:var(--ink-2)">tandem uninstall</code>.</p>
+      <p class="req">The command needs Node 22.13+. Both need Claude Code. For a Linux laptop per Bot, also run <code style="font:13px var(--mono);color:var(--ink-2)">brew install colima docker</code>; otherwise Bots use Google Chrome on your Mac. Remove it anytime with <code style="font:13px var(--mono);color:var(--ink-2)">tandem uninstall</code>.</p>
     </div>
   </div>
 </section>
@@ -783,10 +913,12 @@ footer { padding: 64px 0 40px; }
     <div class="rv">
       <details open><summary>What is Tandem?</summary><p>Tandem gives you AI Bots that work like coworkers. Each one has a job, a memory and a computer to work on. They sign in to your apps, do the work, and check with you before anything goes out.</p></details>
       <details><summary>Is it really free?</summary><p>Yes. Tandem is MIT-licensed with no paid tier. The AI comes from your own Claude Code plan, so Bot replies count toward that plan's usage limits like any other Claude Code session.</p></details>
-      <details><summary>Does a Bot do anything without asking me?</summary><p>Not by default. Emails and messages arrive as drafts with a Send button, and anything that sends, buys, deletes or posts waits for your OK. You can loosen or tighten that with your own rules.</p></details>
+      <details><summary>Does a Bot do anything without asking me?</summary><p>Only routine things, and only with a boss's OK. Bots with a boss send everyday email (supplier quotes, follow-ups, scheduling) once their boss Bot approves it. Anything where the impression matters, like investors, first contact or a commitment, comes to you with the reason why. Spending, signing and deleting your files always wait for you. You can tighten or loosen this with your own rules.</p></details>
       <details><summary>What is a squad, and does it cost more?</summary><p>A squad is one job split across several helper Bots that work at the same time, each on its own computer. Your Bot decides when a job is big enough, or you can just ask for one. Each helper uses your Claude plan while it works, so a five-part squad uses it about five times as fast, for a fraction of the time.</p></details>
-      <details><summary>Do Bots share a computer?</summary><p>No. Every Bot gets its own computer, with its own browser, its own sign-ins and its own files. A shared folder lets them hand work to each other. So your Sales Bot can be signed in to Salesforce while your Inbox Bot only sees email.</p></details>
+      <details><summary>Do Bots share a computer?</summary><p>No. Every Bot gets its own Linux laptop with a desktop, Chromium, LibreOffice, Python and its own files. All of them run together in one small VM on your Mac (seven fit in 5 GB of memory), and a shared folder lets them hand work to each other. The laptops need Colima and Docker (<code>brew install colima docker</code>); without them, each Bot gets its own browser on your Mac instead.</p></details>
       <details><summary>What about passwords and 2FA?</summary><p>Saved logins live in your Mac's Keychain and are filled in for the Bot, which never sees them. For passkeys, codes and CAPTCHAs, the Bot hands you the screen. You do that one step and press I'm done.</p></details>
+      <details><summary>How much of my Claude plan does it use?</summary><p>Bots work in rotating shifts sized to what's left of your plan: up to three at once when you have room, one when you're running low, and they pause before you hit the limit. Bosses with questions waiting go first, so nobody sits blocked.</p></details>
+      <details><summary>Can my cofounder use it too?</summary><p>Yes. Under Settings, Team, add them to get a private sign-in link (it works over Tailscale or the same Wi-Fi). Their requests carry their name and the Bots' questions go to them; only you can send from your accounts or change settings. Since a Claude plan is for one person, switch to a company Anthropic API key when you share.</p></details>
       <details><summary>Does it work when my laptop is closed?</summary><p>Bots run on your Mac, so they work whenever it's awake. Tandem starts at login and keeps going with the window closed. For round-the-clock routines, run it on a Mac mini that stays on.</p></details>
       <details><summary>Can I use it from my phone?</summary><p>Yes. Run <code>tandem install --lan</code>, open the link under Settings, Devices on your phone, and add it to your home screen.</p></details>
       <details><summary>Who makes this?</summary><p>It's an independent open-source project, not affiliated with Anthropic, xAI or SpaceX. Contributions are welcome.</p></details>
@@ -1014,6 +1146,36 @@ function onScroll() {
 addEventListener('scroll', () => requestAnimationFrame(onScroll), { passive: true });
 addEventListener('resize', onScroll);
 onScroll();
+
+// Company demo: type a request, then a result lands in Done today.
+(() => {
+  const el = document.getElementById('coTyped'), rows = document.getElementById('coRows');
+  if (!el || !rows) return;
+  const asks = ['Get 3 quotes for 200 camera enclosures', 'Find 10 ranches in Texas with 500+ head', 'Prep the Friday investor update'];
+  const results = [['Quotes in from Polycase, Hammond and Bud', 'Manufacturing · just now'], ['10 ranches found, 4 already follow us', 'Research · just now'], ['Investor update drafted for your review', 'Fundraising · just now']];
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let k = 0;
+  const run = () => {
+    const text = asks[k % asks.length]; let i = 0;
+    el.textContent = '';
+    const t = setInterval(() => {
+      el.textContent = text.slice(0, ++i);
+      if (i >= text.length) {
+        clearInterval(t);
+        setTimeout(() => {
+          const [b, sp] = results[k % results.length];
+          const row = document.createElement('div'); row.className = 'co-row';
+          row.innerHTML = '<i>✓</i><div><b></b><span></span></div>';
+          row.querySelector('b').textContent = b; row.querySelector('span').textContent = sp;
+          rows.prepend(row); if (rows.children.length > 3) rows.lastElementChild.remove();
+          el.textContent = ''; k++; setTimeout(run, 1600);
+        }, 1400);
+      }
+    }, 45);
+  };
+  if (reduce) { el.textContent = asks[0]; return; }
+  new IntersectionObserver((e, o) => { if (e[0].isIntersecting) { o.disconnect(); run(); } }).observe(el);
+})();
 </script>
 </body>
 </html>
